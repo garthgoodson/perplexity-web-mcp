@@ -55,19 +55,16 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
 SourceFocusName = Literal["web", "academic", "social", "finance", "all"]
 ModelName = Literal["auto", "sonar", "deep_research", "gpt52", "claude_sonnet", "claude_opus", "gemini_flash", "gemini_pro", "grok", "kimi"]
 
-_client: Perplexity | None = None
-
-
 def _get_client() -> Perplexity:
-    """Get or create Perplexity client."""
-
-    global _client  # noqa: PLW0603
-
-    if _client is None:
-        token = get_token_or_raise()
-        _client = Perplexity(token, config=ClientConfig())
-
-    return _client
+    """Create a fresh Perplexity client for each request.
+    
+    We don't cache the client because:
+    1. Token can change after re-authentication
+    2. curl_cffi Sessions can have stale state
+    3. MCP server processes may restart between calls
+    """
+    token = get_token_or_raise()
+    return Perplexity(token, config=ClientConfig())
 
 
 def _ask(query: str, model: Model, source_focus: SourceFocusName = "web") -> str:
@@ -355,7 +352,7 @@ def pplx_auth_complete(email: str, code: str) -> str:
     from orjson import loads
     from perplexity_web_mcp.cli.auth import get_user_info
     
-    global _auth_session, _client
+    global _auth_session
     
     BASE_URL = "https://www.perplexity.ai"
     SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
@@ -398,8 +395,6 @@ def pplx_auth_complete(email: str, code: str) -> str:
         
         # Save token
         if save_token(token):
-            # Clear cached client so it reloads with new token
-            _client = None
             _auth_session = {}
             
             # Get user info
