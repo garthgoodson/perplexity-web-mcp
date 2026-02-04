@@ -219,9 +219,34 @@ class HTTPClient:
             response.close()
 
     def init_search(self, query: str) -> None:
-        """Initialize a search session (required before prompts)."""
-
-        self.get(ENDPOINT_SEARCH_INIT, params={"q": query})
+        """Initialize a search session (required before prompts).
+        
+        Uses minimal headers to avoid Cloudflare bot detection.
+        The full headers (Accept, Content-Type) are only needed for POST requests.
+        """
+        # Use minimal headers for this GET request - full headers trigger Cloudflare
+        url = f"{API_BASE_URL}{ENDPOINT_SEARCH_INIT}"
+        minimal_headers = {
+            "Referer": API_BASE_URL,
+            "Origin": API_BASE_URL,
+        }
+        
+        log_request("GET", url, params={"q": query})
+        self._throttle()
+        
+        request_start = monotonic()
+        response = self._session.get(
+            url, 
+            params={"q": query},
+            headers=minimal_headers,  # Override session headers
+        )
+        elapsed_ms = (monotonic() - request_start) * 1000
+        
+        log_response("GET", url, response.status_code, elapsed_ms=elapsed_ms)
+        
+        if response.status_code == 403:
+            raise AuthenticationError()
+        response.raise_for_status()
 
     def stream_ask(self, payload: dict[str, Any]) -> Generator[bytes, None, None]:
         """Stream a prompt request to the ask endpoint."""

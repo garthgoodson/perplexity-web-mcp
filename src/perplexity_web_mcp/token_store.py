@@ -15,7 +15,10 @@ ENV_KEY = "PERPLEXITY_SESSION_TOKEN"
 
 
 def save_token(token: str) -> bool:
-    """Save token to config directory.
+    """Save token to config directory and update environment.
+    
+    Also sets the environment variable for the current process
+    to ensure the new token is used immediately.
     
     Returns True if successful, False otherwise.
     """
@@ -24,6 +27,8 @@ def save_token(token: str) -> bool:
         TOKEN_FILE.write_text(token, encoding="utf-8")
         # Restrict permissions (owner read/write only)
         TOKEN_FILE.chmod(0o600)
+        # Also update environment so current process uses new token
+        environ[ENV_KEY] = token
         return True
     except Exception:
         return False
@@ -33,17 +38,12 @@ def load_token() -> str | None:
     """Load token from config directory or environment.
     
     Priority:
-    1. PERPLEXITY_SESSION_TOKEN environment variable
-    2. ~/.config/perplexity-web-mcp/token file
+    1. ~/.config/perplexity-web-mcp/token file (source of truth, updated by auth)
+    2. PERPLEXITY_SESSION_TOKEN environment variable (fallback)
     
     Returns token string or None if not found.
     """
-    # Environment variable takes priority
-    env_token = environ.get(ENV_KEY)
-    if env_token:
-        return env_token
-    
-    # Fall back to config file
+    # Config file takes priority (it's updated by auth tools)
     try:
         if TOKEN_FILE.exists():
             token = TOKEN_FILE.read_text(encoding="utf-8").strip()
@@ -51,6 +51,11 @@ def load_token() -> str | None:
                 return token
     except Exception:
         pass
+    
+    # Fall back to environment variable
+    env_token = environ.get(ENV_KEY)
+    if env_token:
+        return env_token
     
     return None
 
