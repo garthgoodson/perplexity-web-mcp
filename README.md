@@ -75,9 +75,11 @@ Use Perplexity models as MCP tools in Claude Desktop, Cursor, or other MCP clien
 
 ### Setup
 
-After running `pwm-auth`, add to your MCP client configuration (Claude Desktop, Cursor, etc.):
+After running `pwm-auth`, add the MCP server to your client:
 
-**If installed with pipx or pip (Option A/B):**
+#### Claude Code CLI
+
+Create or edit `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
@@ -88,7 +90,33 @@ After running `pwm-auth`, add to your MCP client configuration (Claude Desktop, 
 }
 ```
 
-**If installed from clone (Option C):**
+#### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+```json
+{
+  "mcpServers": {
+    "perplexity": {
+      "command": "pwm-mcp"
+    }
+  }
+}
+```
+
+#### Cursor IDE
+
+Go to **Settings → Features → MCP Servers → Add Server** and add:
+```json
+{
+  "perplexity": {
+    "command": "pwm-mcp"
+  }
+}
+```
+
+#### If installed from clone (Option C)
+
+Use the full path to the venv:
 ```json
 {
   "mcpServers": {
@@ -100,8 +128,6 @@ After running `pwm-auth`, add to your MCP client configuration (Claude Desktop, 
 ```
 
 The token is loaded automatically from `~/.config/perplexity-web-mcp/token` (created by `pwm-auth`).
-
-**Override token** (optional): Add `"env": {"PERPLEXITY_SESSION_TOKEN": "..."}` to use a different token.
 
 ### Available MCP Tools
 
