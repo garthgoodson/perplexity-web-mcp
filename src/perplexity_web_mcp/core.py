@@ -150,14 +150,25 @@ class Conversation:
         files: list[str | PathLike] | None = None,
         citation_mode: CitationMode | None = None,
         stream: bool = False,
+        init_query: str | None = None,
     ) -> Conversation:
-        """Ask a question. Returns self for method chaining or streaming iteration."""
+        """Ask a question. Returns self for method chaining or streaming iteration.
+        
+        Args:
+            query: The full query to send to the model
+            model: Optional model override
+            files: Optional files to attach
+            citation_mode: Optional citation mode override
+            stream: Whether to stream the response
+            init_query: Optional shorter query for URL initialization.
+                       Useful when query contains large prompt injections.
+        """
 
         effective_model = model or self._config.model or Models.BEST
         effective_citation = citation_mode if citation_mode is not None else self._config.citation_mode
         self._citation_mode = effective_citation
 
-        self._execute(query, effective_model, files, stream=stream)
+        self._execute(query, effective_model, files, stream=stream, init_query=init_query)
         return self
 
     def _execute(
@@ -166,8 +177,19 @@ class Conversation:
         model: Model,
         files: list[str | PathLike] | None,
         stream: bool = False,
+        init_query: str | None = None,
     ) -> None:
-        """Execute a query."""
+        """Execute a query.
+        
+        Args:
+            query: The full query to send to the model (via POST body)
+            model: The model to use
+            files: Optional files to attach
+            stream: Whether to stream the response
+            init_query: Optional shorter query for init_search URL param.
+                       If not provided, uses first 500 chars of query.
+                       This avoids URL length limits with large queries.
+        """
 
         self._reset_response_state()
 
@@ -177,7 +199,9 @@ class Conversation:
             file_urls = [self._upload_file(f) for f in validated]
 
         payload = self._build_payload(query, model, file_urls)
-        self._http.init_search(query)
+        # Use truncated query for init_search to avoid URL length limits
+        search_query = init_query if init_query is not None else query[:500]
+        self._http.init_search(search_query)
 
         if stream:
             self._stream_generator = self._stream(payload)
