@@ -51,6 +51,19 @@ pip install -e ".[all]"
 - `[mcp]` - MCP server only
 - `[api]` - API server only
 
+### Upgrading
+
+To upgrade to the latest version, uninstall first then reinstall:
+
+```bash
+pip uninstall perplexity-web-mcp -y
+pip install "perplexity-web-mcp[all] @ git+https://github.com/jacob-bd/perplexity-web-mcp.git"
+```
+
+**Note**: A simple `pip install --upgrade` may use cached packages. The uninstall/reinstall approach ensures you get the latest code.
+
+After upgrading, restart your MCP client (Claude Code, Cursor, etc.) to reload the server.
+
 ## Authentication
 
 ```bash
