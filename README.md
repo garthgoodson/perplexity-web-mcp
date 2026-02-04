@@ -15,22 +15,41 @@ Use your Perplexity Pro/Max subscription to access premium models (GPT-5.2, Clau
 
 ## Installation
 
+### Option A: pipx (Recommended - Isolated Install)
+
+```bash
+# Install directly from GitHub (no clone needed)
+pipx install "git+https://github.com/jacob-bd/perplexity-web-mcp.git#egg=perplexity-web-mcp[all]"
+```
+
+This installs `pwm-auth`, `pwm-mcp`, and `pwm-api` as global commands.
+
+### Option B: pip (Global or in existing venv)
+
+```bash
+pip install "git+https://github.com/jacob-bd/perplexity-web-mcp.git#egg=perplexity-web-mcp[all]"
+```
+
+### Option C: Clone + venv (For development)
+
 ```bash
 # Clone the repository
-git clone https://github.com/jbendavi/perplexity-web-mcp.git
+git clone https://github.com/jacob-bd/perplexity-web-mcp.git
 cd perplexity-web-mcp
 
-# Create virtual environment and install
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install with MCP and API support
+# Using uv (fast)
+uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"
 
-# Or install specific features:
-# uv pip install -e ".[mcp]"  # MCP server only
-# uv pip install -e ".[api]"  # API server only
+# Or using standard Python
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all]"
 ```
+
+**Install variants:**
+- `[all]` - MCP server + API server (recommended)
+- `[mcp]` - MCP server only
+- `[api]` - API server only
 
 ## Authentication
 
@@ -56,11 +75,12 @@ Use Perplexity models as MCP tools in Claude Desktop, Cursor, or other MCP clien
 
 Add to your MCP client configuration (Claude Desktop, Cursor, etc.):
 
+**If installed with pipx or pip (Option A/B):**
 ```json
 {
   "mcpServers": {
     "perplexity": {
-      "command": "/path/to/perplexity-web-mcp/.venv/bin/pwm-mcp",
+      "command": "pwm-mcp",
       "env": {
         "PERPLEXITY_SESSION_TOKEN": "your_token_here"
       }
@@ -69,13 +89,15 @@ Add to your MCP client configuration (Claude Desktop, Cursor, etc.):
 }
 ```
 
-If you already have the token saved in the project's `.env` file (via `pwm-auth`), you can omit the env block:
-
+**If installed from clone (Option C):**
 ```json
 {
   "mcpServers": {
     "perplexity": {
-      "command": "/path/to/perplexity-web-mcp/.venv/bin/pwm-mcp"
+      "command": "/path/to/perplexity-web-mcp/.venv/bin/pwm-mcp",
+      "env": {
+        "PERPLEXITY_SESSION_TOKEN": "your_token_here"
+      }
     }
   }
 }
