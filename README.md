@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Perplexity Web MCP" width="700">
+</p>
+
 # Perplexity Web MCP
 
 MCP server and Anthropic/OpenAI API-compatible interface for Perplexity AI's web interface.
@@ -370,7 +374,7 @@ If Claude Code hangs with "zero tokens sent", restart the `pwm-api` server.
 
 ## Credits
 
-Based on [perplexity-ai](https://github.com/helallao/perplexity-ai) by helallao.
+Originally forked from [perplexity-webui-scraper](https://github.com/henrique-coder/perplexity-webui-scraper) by [henrique-coder](https://github.com/henrique-coder).
 
 ## License
 
