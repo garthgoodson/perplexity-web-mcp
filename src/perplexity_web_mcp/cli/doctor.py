@@ -35,10 +35,10 @@ def cmd_doctor(args: list[str]) -> int:
     # --- Installation ---
     print("Installation")
     try:
-        version = metadata.version("perplexity-web-mcp")
-        _check("perplexity-web-mcp", True, version)
+        version = metadata.version("perplexity-web-mcp-cli")
+        _check("perplexity-web-mcp-cli", True, version)
     except metadata.PackageNotFoundError:
-        all_ok = _check("perplexity-web-mcp", False, "not installed", "pip install perplexity-web-mcp") and all_ok
+        all_ok = _check("perplexity-web-mcp-cli", False, "not installed", "pip install perplexity-web-mcp-cli") and all_ok
 
     pwm_path = shutil.which("pwm")
     _check("pwm", pwm_path is not None, pwm_path or "not in PATH", "pip install -e '.[mcp]'")

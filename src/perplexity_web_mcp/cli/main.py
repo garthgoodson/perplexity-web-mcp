@@ -86,8 +86,8 @@ def _print_version() -> None:
     """Print version."""
     from importlib import metadata
 
-    version = metadata.version("perplexity-web-mcp")
-    print(f"perplexity-web-mcp {version}")
+    version = metadata.version("perplexity-web-mcp-cli")
+    print(f"perplexity-web-mcp-cli {version}")
 
 
 def _cmd_ask(args: list[str]) -> int:

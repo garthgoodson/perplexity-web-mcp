@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **perplexity-web-mcp** are documented in this file.
+All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 

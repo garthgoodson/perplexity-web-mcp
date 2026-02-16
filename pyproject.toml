@@ -1,7 +1,7 @@
 [project]
-name = "perplexity-web-mcp"
-version = "0.4.1"
-description = "MCP server and Anthropic API-compatible interface for Perplexity AI web interface."
+name = "perplexity-web-mcp-cli"
+version = "0.5.0"
+description = "CLI, MCP server, and Anthropic/OpenAI API-compatible interface for Perplexity AI."
 authors = [{ name = "Jacob Ben David" }]
 license = "MIT"
 readme = "README.md"
@@ -58,7 +58,7 @@ api = [
     "httpx>=0.27.0,<1.0",
 ]
 all = [
-    "perplexity-web-mcp[mcp,api]",
+    "perplexity-web-mcp-cli[mcp,api]",
 ]
 
 [project.urls]
@@ -117,6 +117,9 @@ skip-magic-trailing-comma = false
 pwm = "perplexity_web_mcp.cli.main:main"
 pwm-mcp = "perplexity_web_mcp.mcp:run_server"
 pwm-api = "perplexity_web_mcp.api:run_server"
+
+[tool.uv.build-backend]
+module-name = "perplexity_web_mcp"
 
 [build-system]
 requires = ["uv_build"]

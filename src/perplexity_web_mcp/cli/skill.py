@@ -113,7 +113,7 @@ def _get_installed_version(target_dir: Path) -> str | None:
 def _get_current_version() -> str:
     """Get the current package version."""
     try:
-        return metadata.version("perplexity-web-mcp")
+        return metadata.version("perplexity-web-mcp-cli")
     except metadata.PackageNotFoundError:
         return "unknown"
 

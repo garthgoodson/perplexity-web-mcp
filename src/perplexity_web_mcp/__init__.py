@@ -24,7 +24,7 @@ from .types import Coordinates, Response, SearchResultItem
 ConversationConfig.model_rebuild()
 
 
-__version__: str = metadata.version("perplexity-web-mcp")
+__version__: str = metadata.version("perplexity-web-mcp-cli")
 __all__: list[str] = [
     "AuthenticationError",
     "CitationMode",

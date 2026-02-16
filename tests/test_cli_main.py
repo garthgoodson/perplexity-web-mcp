@@ -42,7 +42,7 @@ class TestMainRouting:
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
-        assert "perplexity-web-mcp" in capsys.readouterr().out
+        assert "perplexity-web-mcp-cli" in capsys.readouterr().out
 
     def test_ai_flag(self, capsys: pytest.CaptureFixture) -> None:
         with patch.object(sys, "argv", ["pwm", "--ai"]):

@@ -1,7 +1,7 @@
 ---
 name: querying-perplexity
 description: >-
-  Search the web and query AI models via Perplexity AI using perplexity-web-mcp.
+  Search the web and query AI models via Perplexity AI using perplexity-web-mcp-cli.
   Supports CLI commands (pwm ask, pwm research), MCP tools (pplx_*), and
   Anthropic/OpenAI-compatible API server. Use when the user mentions "perplexity",
   "pplx", "pwm", "web search with AI", "deep research", "search the internet",
