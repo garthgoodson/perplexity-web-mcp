@@ -39,10 +39,30 @@ QUERYING
   pwm ask "query" --json              Output as JSON (answer + citations)
   pwm ask "query" --no-citations      Suppress citation URLs
 
+  Model selection examples (-m):
+    pwm ask "Compare React and Vue" -m gpt52
+    pwm ask "Explain attention mechanism" -m claude_sonnet
+    pwm ask "Prove sqrt(2) is irrational" -m claude_sonnet --thinking
+    pwm ask "Summarize this paper" -m gemini_pro
+
+  Source focus examples (-s):
+    pwm ask "transformer improvements 2025" -s academic    # Scholarly papers
+    pwm ask "best mechanical keyboard" -s social           # Reddit/Twitter
+    pwm ask "Apple revenue Q4 2025" -s finance             # SEC EDGAR filings
+    pwm ask "latest AI news" -s all                        # All sources combined
+
+  Combined:
+    pwm ask "protein folding advances" -m gemini_pro -s academic --json
+
 DEEP RESEARCH
-  pwm research "query"                In-depth research report
+  pwm research "query"                In-depth research report (monthly quota)
   pwm research "query" -s SOURCE      Research with specific sources
   pwm research "query" --json         Output as JSON
+
+  Examples:
+    pwm research "agentic AI trends 2026"
+    pwm research "climate policy impact" -s academic
+    pwm research "NVIDIA competitive landscape" -s finance --json
 
 USAGE & LIMITS
   pwm usage                           Check remaining rate limits and quotas
@@ -80,16 +100,23 @@ Use with MCP: pplx_query(query="...", model="gpt52", thinking=True)
 SOURCE FOCUS OPTIONS
 ================================================================================
 
-Name        Description
---------    -----------
-web         General web search (default)
-academic    Academic papers and scholarly articles
-social      Social media (Reddit, Twitter, etc.)
-finance     SEC EDGAR filings
-all         Web + Academic + Social combined
+Name        Description                          Example Use Case
+--------    -----------                          ----------------
+web         General web search (default)         News, general questions
+academic    Academic papers and scholarly articles  Research, citations, scientific topics
+social      Social media (Reddit, Twitter, etc.) Opinions, recommendations, community
+finance     SEC EDGAR filings                    Company financials, regulatory filings
+all         Web + Academic + Social combined      Broad coverage across all sources
 
-Use with CLI: pwm ask "query" -s academic
-Use with MCP: pplx_ask(query="...", source_focus="academic")
+CLI examples:
+  pwm ask "transformer architecture" -s academic
+  pwm ask "best laptop 2026" -s social
+  pwm ask "Tesla 10-K filing" -s finance
+  pwm ask "latest AI breakthroughs" -s all
+
+MCP examples:
+  pplx_ask(query="transformer architecture", source_focus="academic")
+  pplx_query(query="Tesla financials", model="gpt52", source_focus="finance")
 
 ================================================================================
 MCP TOOLS (17 total, pplx_* namespace)
@@ -206,11 +233,23 @@ COMMON WORKFLOWS
 Quick web search:
   pwm ask "What happened in AI today?"
 
-Specific model with thinking:
-  pwm ask "Explain quantum computing" -m claude_sonnet -t
+Specific model:
+  pwm ask "Compare React and Vue" -m gpt52
+
+Model with thinking:
+  pwm ask "Prove sqrt(2) is irrational" -m claude_sonnet -t
+
+Academic research:
+  pwm ask "transformer improvements 2025" -m gemini_pro -s academic
+
+Financial analysis:
+  pwm ask "Apple revenue Q4 2025" -s finance
 
 Deep research:
   pwm research "agentic AI trends 2026"
+
+Deep research (academic + JSON):
+  pwm research "climate policy impact" -s academic --json
 
 Check auth + limits before heavy use:
   pwm login --check && pwm usage

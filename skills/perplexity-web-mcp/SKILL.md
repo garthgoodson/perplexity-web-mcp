@@ -88,18 +88,47 @@ User wants to...
 ### Querying
 
 ```bash
-pwm ask "What is quantum computing?"                    # Auto model
-pwm ask "latest AI news" -m gpt52 -s academic           # GPT-5.2 + academic sources
-pwm ask "explain transformers" -m claude_sonnet -t       # Claude + thinking
-pwm ask "query" --json                                   # JSON output
-pwm ask "query" --no-citations                           # No citation URLs
+pwm ask "What is quantum computing?"
+```
+
+Choose a specific model with `-m`:
+```bash
+pwm ask "Compare React and Vue" -m gpt52
+pwm ask "Explain attention mechanism" -m claude_sonnet
+```
+
+Enable extended thinking with `-t`:
+```bash
+pwm ask "Prove sqrt(2) is irrational" -m claude_sonnet --thinking
+```
+
+Focus on specific sources with `-s`:
+```bash
+pwm ask "transformer improvements 2025" -s academic   # Scholarly papers
+pwm ask "best mechanical keyboard" -s social           # Reddit/Twitter
+pwm ask "Apple revenue Q4 2025" -s finance             # SEC EDGAR filings
+pwm ask "latest AI news" -s all                        # All sources
+```
+
+Output options:
+```bash
+pwm ask "What is Rust?" --json            # JSON (for piping)
+pwm ask "What is Rust?" --no-citations    # Answer only, no URLs
+```
+
+Combine flags:
+```bash
+pwm ask "protein folding advances" -m gemini_pro -s academic --json
 ```
 
 ### Deep Research
 
+Uses a separate monthly quota. Produces in-depth reports with extensive sources.
+
 ```bash
-pwm research "agentic AI trends 2026"                   # Full research report
-pwm research "climate policy" -s academic --json         # Academic + JSON
+pwm research "agentic AI trends 2026"
+pwm research "climate policy impact" -s academic
+pwm research "NVIDIA competitive landscape" -s finance --json
 ```
 
 ### Authentication
@@ -158,11 +187,13 @@ For full model details: See [references/models.md](references/models.md)
 
 ## Source Focus Options
 
-- `web` (default) -- General web search
-- `academic` -- Academic papers and scholarly articles
-- `social` -- Social media (Reddit, Twitter, etc.)
-- `finance` -- SEC EDGAR filings
-- `all` -- Web + Academic + Social combined
+| Option | Description | Example Use Case |
+|--------|-------------|------------------|
+| `web` | General web search (default) | News, general questions |
+| `academic` | Academic papers, journals | Research, citations, scientific topics |
+| `social` | Reddit, Twitter, forums | Opinions, recommendations, community |
+| `finance` | SEC EDGAR filings | Company financials, regulatory filings |
+| `all` | Web + Academic + Social | Broad coverage across all sources |
 
 ## Error Recovery
 
@@ -175,12 +206,32 @@ For full model details: See [references/models.md](references/models.md)
 
 ## Common Patterns
 
-### Quick search
+### Quick web search
 ```bash
 pwm ask "What happened in AI today?"
 ```
 
-### Research pipeline
+### Specific model
+```bash
+pwm ask "Compare React and Vue" -m gpt52
+```
+
+### Model with thinking
+```bash
+pwm ask "Prove sqrt(2) is irrational" -m claude_sonnet -t
+```
+
+### Academic research
+```bash
+pwm ask "transformer improvements 2025" -m gemini_pro -s academic
+```
+
+### Financial analysis
+```bash
+pwm ask "Apple revenue Q4 2025" -s finance
+```
+
+### Deep research pipeline
 ```bash
 pwm research "quantum computing breakthroughs 2026" --json > research.json
 ```
