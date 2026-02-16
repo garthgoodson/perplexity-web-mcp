@@ -6,7 +6,7 @@ CLI, MCP server, and API-compatible interface for Perplexity AI's web interface.
 
 ```bash
 # Install
-uv venv && uv pip install -e ".[mcp]"
+uv venv && uv pip install -e .
 
 # Authenticate
 pwm login
@@ -70,7 +70,7 @@ pwm --ai                                       # AI reference doc
 
 ```bash
 # Install with dev dependencies
-uv pip install -e ".[mcp,api]"
+uv pip install -e .
 
 # Run tests
 uv run --group tests --extra mcp pytest tests/ -v

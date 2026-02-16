@@ -28,19 +28,19 @@ Use your Perplexity Pro/Max subscription to access premium models (GPT-5.2, Clau
 **Using uv:**
 
 ```bash
-uv tool install "perplexity-web-mcp-cli[all]"
+uv tool install perplexity-web-mcp-cli
 ```
 
 **Using pipx:**
 
 ```bash
-pipx install "perplexity-web-mcp-cli[all]"
+pipx install perplexity-web-mcp-cli
 ```
 
 **Using pip:**
 
 ```bash
-pip install "perplexity-web-mcp-cli[all]"
+pip install perplexity-web-mcp-cli
 ```
 
 > **Note:** Requires Python 3.10-3.13.
@@ -51,20 +51,13 @@ pip install "perplexity-web-mcp-cli[all]"
 git clone https://github.com/jacob-bd/perplexity-web-mcp.git
 cd perplexity-web-mcp
 uv venv && source .venv/bin/activate
-uv pip install -e ".[all]"
+uv pip install -e .
 ```
-
-### Install variants
-
-- `[all]` -- MCP server + API server (recommended)
-- `[mcp]` -- MCP server only
-- `[api]` -- API server only
-- No extras -- CLI + Python library only
 
 ### Upgrading
 
 ```bash
-pip install --upgrade perplexity-web-mcp-cli[all]
+pip install --upgrade perplexity-web-mcp-cli
 ```
 
 After upgrading, restart your MCP client (Claude Code, Cursor, etc.) to reload the server.
