@@ -71,8 +71,8 @@ def _get_tools() -> list[AITool]:
         AITool(
             name="cline",
             description="Cline CLI terminal agent",
-            config_path=home / ".cline" / "data" / "settings.json",
-            config_hint=str(home / ".cline/data/settings.json"),
+            config_path=home / ".cline" / "data" / "settings" / "cline_mcp_settings.json",
+            config_hint=str(home / ".cline/data/settings/cline_mcp_settings.json"),
         ),
         AITool(
             name="antigravity",

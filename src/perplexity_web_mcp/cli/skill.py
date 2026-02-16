@@ -55,7 +55,7 @@ def _get_targets() -> list[SkillTarget]:
         SkillTarget(
             name="opencode",
             description="OpenCode AI assistant",
-            user_dir=home / ".opencode" / "skills",
+            user_dir=home / ".config" / "opencode" / "skills",
             project_dir=".opencode/skills",
         ),
         SkillTarget(
