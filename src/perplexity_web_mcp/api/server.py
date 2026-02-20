@@ -165,10 +165,10 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     "gemini-3-flash": (Models.GEMINI_3_FLASH, Models.GEMINI_3_FLASH_THINKING),
     "gemini-3.0-flash": (Models.GEMINI_3_FLASH, Models.GEMINI_3_FLASH_THINKING),
     "gemini-flash": (Models.GEMINI_3_FLASH, Models.GEMINI_3_FLASH_THINKING),
-    # Gemini 3 Pro - thinking only, no non-thinking variant available
-    "gemini-3-pro": (Models.GEMINI_3_PRO_THINKING, Models.GEMINI_3_PRO_THINKING),
-    "gemini-3.0-pro": (Models.GEMINI_3_PRO_THINKING, Models.GEMINI_3_PRO_THINKING),
-    "gemini-pro": (Models.GEMINI_3_PRO_THINKING, Models.GEMINI_3_PRO_THINKING),
+    # Gemini 3.1 Pro - thinking only, no non-thinking variant available
+    "gemini-3.1-pro": (Models.GEMINI_31_PRO_THINKING, Models.GEMINI_31_PRO_THINKING),
+    "gemini-3-pro": (Models.GEMINI_31_PRO_THINKING, Models.GEMINI_31_PRO_THINKING),
+    "gemini-pro": (Models.GEMINI_31_PRO_THINKING, Models.GEMINI_31_PRO_THINKING),
     
     # ==========================================================================
     # xAI Grok 4.1 (via Perplexity) - supports thinking toggle
@@ -197,7 +197,7 @@ AVAILABLE_MODELS = [
     {"id": "perplexity-research", "description": "Deep Research - In-depth reports with sources"},
     # Google Gemini
     {"id": "gemini-3-flash", "description": "Gemini 3 Flash - Fast, thinking toggle available"},
-    {"id": "gemini-3-pro", "description": "Gemini 3 Pro - Advanced, thinking always on"},
+    {"id": "gemini-3.1-pro", "description": "Gemini 3.1 Pro - Advanced, thinking always on"},
     # OpenAI
     {"id": "gpt-5.2", "description": "GPT-5.2 - OpenAI's latest, thinking toggle available"},
     # Anthropic Claude

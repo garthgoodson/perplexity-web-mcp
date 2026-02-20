@@ -158,7 +158,7 @@ pwm usage --refresh         # Force-refresh from server
 | `pplx_gpt52` / `_thinking` | OpenAI GPT-5.2 |
 | `pplx_claude_sonnet` / `_think` | Anthropic Claude 4.6 Sonnet |
 | `pplx_gemini_flash` / `_think` | Google Gemini 3 Flash |
-| `pplx_gemini_pro_think` | Google Gemini 3 Pro (thinking always on) |
+| `pplx_gemini_pro_think` | Google Gemini 3.1 Pro (thinking always on) |
 | `pplx_grok` / `_thinking` | xAI Grok 4.1 |
 | `pplx_kimi_thinking` | Moonshot Kimi K2.5 (thinking always on) |
 | `pplx_usage` | Check remaining quotas |
@@ -179,7 +179,7 @@ For full MCP tool parameters: See [references/mcp-tools.md](references/mcp-tools
 | claude_sonnet | Anthropic | Toggle | Claude 4.6 Sonnet |
 | claude_opus | Anthropic | Toggle | Claude 4.6 Opus (Max tier) |
 | gemini_flash | Google | Toggle | Gemini 3 Flash |
-| gemini_pro | Google | Always | Gemini 3 Pro |
+| gemini_pro | Google | Always | Gemini 3.1 Pro |
 | grok | xAI | Toggle | Grok 4.1 |
 | kimi | Moonshot | Always | Kimi K2.5 |
 

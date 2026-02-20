@@ -125,8 +125,8 @@ def pplx_gemini_flash_think(query: str, source_focus: SourceFocusName = "web") -
 
 @mcp.tool
 def pplx_gemini_pro_think(query: str, source_focus: SourceFocusName = "web") -> str:
-    """Gemini 3 Pro Thinking - Google's most advanced model with extended thinking."""
-    return ask(query, Models.GEMINI_3_PRO_THINKING, source_focus)
+    """Gemini 3.1 Pro Thinking - Google's most advanced model with extended thinking."""
+    return ask(query, Models.GEMINI_31_PRO_THINKING, source_focus)
 
 
 @mcp.tool

@@ -34,8 +34,8 @@ class Models:
     GEMINI_3_FLASH_THINKING = Model(identifier="gemini30flash_high")
     """Gemini 3 Flash Thinking - Google's fast model (thinking)."""
 
-    GEMINI_3_PRO_THINKING = Model(identifier="gemini30pro")
-    """Gemini 3 Pro Thinking - Google's most advanced model (thinking)."""
+    GEMINI_31_PRO_THINKING = Model(identifier="gemini31pro_high")
+    """Gemini 3.1 Pro Thinking - Google's most advanced model (thinking)."""
 
     GPT_52 = Model(identifier="gpt52")
     """GPT-5.2 - OpenAI's latest model."""

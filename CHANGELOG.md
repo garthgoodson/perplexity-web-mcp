@@ -4,6 +4,14 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.5.6] - 2026-02-20
+
+### Changed
+
+- **Gemini 3 Pro updated to Gemini 3.1 Pro** — Model name and identifier updated to `gemini31pro_high` (verified via Chrome DevTools network capture).
+
+---
+
 ## [0.5.5] - 2026-02-17
 
 ### Changed

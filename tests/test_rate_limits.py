@@ -698,7 +698,7 @@ class TestMCPServerHelpers:
             Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING,
             Models.CLAUDE_46_OPUS, Models.CLAUDE_46_OPUS_THINKING,
             Models.GEMINI_3_FLASH, Models.GEMINI_3_FLASH_THINKING,
-            Models.GEMINI_3_PRO_THINKING,
+            Models.GEMINI_31_PRO_THINKING,
             Models.GROK_41, Models.GROK_41_THINKING,
             Models.KIMI_K25_THINKING,
         ]

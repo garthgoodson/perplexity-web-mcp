@@ -80,8 +80,8 @@ class TestResolveModel:
 
     def test_gemini_pro_always_thinking(self) -> None:
         # gemini_pro has no non-thinking variant
-        assert resolve_model("gemini_pro") is Models.GEMINI_3_PRO_THINKING
-        assert resolve_model("gemini_pro", thinking=True) is Models.GEMINI_3_PRO_THINKING
+        assert resolve_model("gemini_pro") is Models.GEMINI_31_PRO_THINKING
+        assert resolve_model("gemini_pro", thinking=True) is Models.GEMINI_31_PRO_THINKING
 
     def test_kimi_always_thinking(self) -> None:
         assert resolve_model("kimi") is Models.KIMI_K25_THINKING

@@ -50,8 +50,8 @@ Complete list of models available through Perplexity Web MCP.
 - **CLI:** `pwm ask "query" -m gemini_flash` or `pwm ask "query" -m gemini_flash -t`
 - **MCP:** `pplx_gemini_flash(query)` or `pplx_gemini_flash_think(query)`
 
-### gemini_pro (Google Gemini 3 Pro)
-- **Identifier:** `gemini30pro`
+### gemini_pro (Google Gemini 3.1 Pro)
+- **Identifier:** `gemini31pro_high`
 - **Thinking:** Always on (no non-thinking variant)
 - **CLI:** `pwm ask "query" -m gemini_pro`
 - **MCP:** `pplx_gemini_pro_think(query)` or `pplx_query(query, model="gemini_pro")`

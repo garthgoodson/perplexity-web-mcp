@@ -60,7 +60,7 @@ pplx_<model>(
 | `pplx_claude_sonnet_think` | Claude 4.6 Sonnet | Yes |
 | `pplx_gemini_flash` | Gemini 3 Flash | No |
 | `pplx_gemini_flash_think` | Gemini 3 Flash | Yes |
-| `pplx_gemini_pro_think` | Gemini 3 Pro | Yes (always) |
+| `pplx_gemini_pro_think` | Gemini 3.1 Pro | Yes (always) |
 | `pplx_grok` | Grok 4.1 | No |
 | `pplx_grok_thinking` | Grok 4.1 | Yes |
 | `pplx_kimi_thinking` | Kimi K2.5 | Yes (always) |

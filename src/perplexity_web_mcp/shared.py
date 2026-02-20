@@ -43,7 +43,7 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     "claude_sonnet": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
     "claude_opus": (Models.CLAUDE_46_OPUS, Models.CLAUDE_46_OPUS_THINKING),
     "gemini_flash": (Models.GEMINI_3_FLASH, Models.GEMINI_3_FLASH_THINKING),
-    "gemini_pro": (Models.GEMINI_3_PRO_THINKING, Models.GEMINI_3_PRO_THINKING),
+    "gemini_pro": (Models.GEMINI_31_PRO_THINKING, Models.GEMINI_31_PRO_THINKING),
     "grok": (Models.GROK_41, Models.GROK_41_THINKING),
     "kimi": (Models.KIMI_K25_THINKING, Models.KIMI_K25_THINKING),
 }

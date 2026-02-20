@@ -86,7 +86,7 @@ gpt52           gpt52                   Yes        OpenAI GPT-5.2
 claude_sonnet   claude46sonnet          Yes        Anthropic Claude 4.6 Sonnet
 claude_opus     claude46opus            Yes        Anthropic Claude 4.6 Opus (Max tier)
 gemini_flash    gemini30flash           Yes        Google Gemini 3 Flash
-gemini_pro      gemini30pro             Always     Google Gemini 3 Pro (thinking only)
+gemini_pro      gemini31pro_high        Always     Google Gemini 3.1 Pro (thinking only)
 grok            grok41nonreasoning      Yes        xAI Grok 4.1
 kimi            kimik25thinking         Always     Moonshot Kimi K2.5 (thinking only)
 
@@ -139,7 +139,7 @@ QUERY TOOLS (14):
   pplx_claude_sonnet_think(query, source_focus)   Claude 4.6 Sonnet + thinking
   pplx_gemini_flash(query, source_focus="web")    Gemini 3 Flash
   pplx_gemini_flash_think(query, source_focus)    Gemini 3 Flash + thinking
-  pplx_gemini_pro_think(query, source_focus)      Gemini 3 Pro (thinking always on)
+  pplx_gemini_pro_think(query, source_focus)      Gemini 3.1 Pro (thinking always on)
   pplx_grok(query, source_focus="web")            Grok 4.1
   pplx_grok_thinking(query, source_focus="web")   Grok 4.1 + thinking
   pplx_kimi_thinking(query, source_focus="web")   Kimi K2.5 (thinking always on)

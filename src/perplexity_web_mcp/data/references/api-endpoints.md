@@ -67,7 +67,7 @@ The API server accepts many model name variants:
 | `claude-3-opus` (legacy) | Claude 4.6 Opus |
 | `gpt-5.2`, `gpt-52`, `gpt52` | GPT-5.2 |
 | `gemini-3-flash`, `gemini-flash` | Gemini 3 Flash |
-| `gemini-3-pro`, `gemini-pro` | Gemini 3 Pro |
+| `gemini-3.1-pro`, `gemini-3-pro`, `gemini-pro` | Gemini 3.1 Pro |
 | `grok-4.1`, `grok` | Grok 4.1 |
 | `kimi-k2.5`, `kimi` | Kimi K2.5 |
 
