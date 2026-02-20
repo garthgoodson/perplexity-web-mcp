@@ -116,15 +116,13 @@ def _hack_claude(args: list[str]) -> int:
         env["ANTHROPIC_API_KEY"] = "perplexity"
 
         # 5. Handle model selection
-        # Pass the model to Claude Code via --model. Claude Code validates model names
-        # by querying the /v1/models endpoint on our API server (which is now running).
-        # This also enables mid-session model switching via /model inside Claude Code.
+        # Pass model via --model directly to Claude Code. When Claude Code shows its
+        # /model picker with built-in names (sonnet, opus, haiku), our API server maps
+        # those to the correct Perplexity models. This enables mid-session switching.
         claude_args = list(args)
-        
         if "-m" in claude_args:
             idx = claude_args.index("-m")
             claude_args[idx] = "--model"
-            
         if "--model" not in claude_args:
             claude_args.extend(["--model", "perplexity-auto"])
 
