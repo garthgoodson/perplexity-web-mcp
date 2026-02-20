@@ -287,7 +287,13 @@ def cmd_skill(args: list[str]) -> int:
 
         updated = 0
         for t in targets:
+            seen_dests = set()
             for dest in [t.user_dir, Path.cwd() / t.project_dir]:
+                abs_path = str(dest.absolute())
+                if abs_path in seen_dests:
+                    continue
+                seen_dests.add(abs_path)
+
                 installed_ver = _get_installed_version(dest / SKILL_DIR_NAME)
                 if installed_ver and installed_ver != current_version:
                     if _install_skill(source, dest):

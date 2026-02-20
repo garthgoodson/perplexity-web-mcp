@@ -4,6 +4,15 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.5.8] - 2026-02-20
+
+### Fixed
+
+- **Skill Update Deduping** — Prevented duplicate skill updates in `pwm skill update` when the current working directory matches the user directory (e.g., running from `~`).
+- **Skill Version Tracking** — Synchronized the internal `SKILL.md` metadata versions to track the CLI releases properly.
+
+---
+
 ## [0.5.7] - 2026-02-20
 
 ### Added
