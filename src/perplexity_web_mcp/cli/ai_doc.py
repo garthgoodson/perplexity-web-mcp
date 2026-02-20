@@ -68,6 +68,10 @@ USAGE & LIMITS
   pwm usage                           Check remaining rate limits and quotas
   pwm usage --refresh                 Force-refresh from Perplexity servers
 
+HACK (INTEGRATION)
+  pwm hack claude                     Launch Claude Code using Perplexity models
+  pwm hack claude -m gpt52            Launch Claude Code with a specific model
+
 OTHER
   pwm --ai                            Print this AI reference document
   pwm --version                       Show version
@@ -194,7 +198,7 @@ Endpoints:
 
 Claude Code setup:
   export ANTHROPIC_BASE_URL=http://localhost:8080
-  export ANTHROPIC_AUTH_TOKEN=perplexity
+  export ANTHROPIC_API_KEY=perplexity
   claude --model gpt-5.2
 
 MCP SERVER (pwm-mcp)

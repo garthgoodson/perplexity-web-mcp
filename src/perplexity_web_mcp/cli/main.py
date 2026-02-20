@@ -7,7 +7,7 @@ Subcommands:
     pwm ask "query"     Ask a question (web search + AI model)
     pwm research "q"    Deep research on a topic
     pwm usage           Check remaining rate limits and quotas
-    pwm setup           Configure MCP server for AI tools
+    pwm hack claude     Launch Claude Code connected to Perplexity models
     pwm skill           Manage skill installation across AI platforms
     pwm doctor          Diagnose installation, auth, config, and limits
     pwm --ai            Print AI-optimized documentation (for LLM agents)
@@ -44,6 +44,7 @@ def _print_help() -> None:
         "  pwm login [options]             Authenticate with Perplexity\n"
         "  pwm usage [--refresh]           Check remaining rate limits and quotas\n"
         "  pwm setup [add|remove|list]     Configure MCP server for AI tools\n"
+        "  pwm hack claude [options]       Launch Claude Code using Perplexity models\n"
         "  pwm skill [install|list|...]    Manage skill across AI platforms\n"
         "  pwm doctor [-v]                 Diagnose installation, auth, and config\n"
         "  pwm --ai                        Print AI-optimized documentation\n"
@@ -299,6 +300,11 @@ def main() -> NoReturn:
         from perplexity_web_mcp.cli.setup import cmd_setup
 
         sys.exit(cmd_setup(args[1:]))
+
+    if first == "hack":
+        from perplexity_web_mcp.cli.hack import cmd_hack
+
+        sys.exit(cmd_hack(args[1:]))
 
     if first == "skill":
         from perplexity_web_mcp.cli.skill import cmd_skill

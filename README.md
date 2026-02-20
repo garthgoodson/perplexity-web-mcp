@@ -182,6 +182,15 @@ pwm usage                  # Check remaining rate limits
 pwm usage --refresh        # Force-refresh from Perplexity servers
 ```
 
+### Hack
+
+Seamlessly launch external AI tools connected to the Perplexity API server. This automatically starts the local `pwm-api` server in the background, sets the required environment variables, and launches the tool.
+
+```bash
+pwm hack claude            # Launch Claude Code
+pwm hack claude -m gpt52   # Launch Claude Code with a specific model
+```
+
 ### MCP Setup
 
 ```bash
@@ -331,8 +340,14 @@ pwm-api
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
-export ANTHROPIC_AUTH_TOKEN=perplexity
+export ANTHROPIC_API_KEY=perplexity
 claude --model gpt-5.2
+```
+
+Alternatively, launch Claude Code seamlessly using the `hack` command, which automatically starts the API server and configures the environment for you:
+
+```bash
+pwm hack claude
 ```
 
 ### OpenAI API
