@@ -4,6 +4,14 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.6.0] - 2026-02-20
+
+### Changed
+
+- **`pwm hack claude` model handling rewritten** — Now passes `--model` directly to Claude Code (matching the gemini-web-mcp pattern). Claude Code validates model names against the running API server's `/v1/models` endpoint, and `/model` mid-session switching works with the built-in picker (sonnet, opus, haiku are mapped to Perplexity models server-side). Removed the `ANTHROPIC_MODEL` env var approach that prevented `/model` switching.
+
+---
+
 ## [0.5.9] - 2026-02-20
 
 ### Added
