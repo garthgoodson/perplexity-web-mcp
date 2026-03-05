@@ -4,6 +4,22 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.8.0] - 2026-03-05
+
+### Added
+
+- **GPT-5.4 model support** — OpenAI's latest model added to Perplexity. Identifiers: `gpt54` / `gpt54_thinking`. Supports thinking toggle.
+- `pplx_gpt54` and `pplx_gpt54_thinking` MCP tools.
+- API server aliases: `gpt-5.4`, `gpt-5-4`, `gpt-54`, `gpt54`.
+- CLI: `pwm ask "query" -m gpt54` (with optional `-t` for thinking).
+
+### Changed
+
+- MCP tool count increased from 17 to 19.
+- GPT-5.2 descriptions updated from "latest" to reflect GPT-5.4 as the newest OpenAI model.
+
+---
+
 ## [0.7.2] - 2026-03-01
 
 ### Added
