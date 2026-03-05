@@ -150,9 +150,9 @@ class TestCmdSkill:
         assert cmd_skill(["show"]) == 0
         assert "My Skill Content" in capsys.readouterr().out
 
-    def test_install_missing_tool_returns_1(self, capsys: pytest.CaptureFixture) -> None:
-        assert cmd_skill(["install"]) == 1
-        assert "requires a tool" in capsys.readouterr().err
+    def test_install_missing_tool_shows_usage(self, capsys: pytest.CaptureFixture) -> None:
+        assert cmd_skill(["install"]) == 0
+        assert "Usage:" in capsys.readouterr().out
 
     def test_install_unknown_tool_returns_1(self, capsys: pytest.CaptureFixture) -> None:
         assert cmd_skill(["install", "nonexistent"]) == 1

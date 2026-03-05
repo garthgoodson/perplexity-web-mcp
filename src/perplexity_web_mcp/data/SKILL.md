@@ -8,7 +8,7 @@ description: >-
   or wants to query premium models like GPT-5.4, GPT-5.2, Claude, Gemini, Grok through
   Perplexity's web interface.
 metadata:
-  version: "0.8.0"
+  version: "0.8.1"
   author: "Jacob BD"
 ---
 

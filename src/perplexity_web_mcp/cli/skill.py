@@ -85,6 +85,14 @@ def _get_targets() -> list[SkillTarget]:
     ]
 
 
+def _is_tool_detected(target: SkillTarget) -> bool:
+    """Check if a tool appears to be installed on this system.
+
+    Looks for the tool's config directory (parent of its skills dir).
+    """
+    return target.user_dir.parent.is_dir()
+
+
 def _find_skill_source() -> Path | None:
     """Find the bundled skill source directory.
 
@@ -162,6 +170,64 @@ def _uninstall_skill(dest_dir: Path) -> bool:
         return False
 
 
+def _install_all(targets: list[SkillTarget], current_version: str) -> int:
+    """Install skill to all detected tools on the system."""
+    source = _find_skill_source()
+    if source is None:
+        print("Error: Could not find skill source files.", file=sys.stderr)
+        return 1
+
+    detected: list[SkillTarget] = []
+    not_detected: list[str] = []
+
+    for t in targets:
+        if _is_tool_detected(t):
+            detected.append(t)
+        else:
+            not_detected.append(t.name)
+
+    if not detected:
+        print("  No supported tools detected on this system.")
+        print(f"  Looked for: {', '.join(t.name for t in targets)}")
+        return 0
+
+    installed: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+
+    for t in detected:
+        existing_ver = _get_installed_version(t.user_dir / SKILL_DIR_NAME)
+        if existing_ver == current_version:
+            skipped.append(t.name)
+            continue
+        t.user_dir.mkdir(parents=True, exist_ok=True)
+        if _install_skill(source, t.user_dir):
+            if existing_ver:
+                print(f"  ✓ {t.name}: v{existing_ver} → v{current_version}")
+            else:
+                print(f"  ✓ {t.name}: Installed v{current_version}")
+            installed.append(t.name)
+        else:
+            failed.append(t.name)
+
+    print()
+    if installed:
+        print(f"  Installed: {', '.join(installed)}")
+    if skipped:
+        print(f"  Already current: {', '.join(skipped)}")
+    if not_detected:
+        print(f"  Not detected: {', '.join(not_detected)}")
+    if failed:
+        print(f"  Failed: {', '.join(failed)}")
+
+    total = len(installed)
+    if total:
+        print(f"\n  Installed skill to {total} tool(s) (v{current_version}).")
+    else:
+        print(f"\n  All detected tools already have v{current_version}.")
+    return 1 if failed else 0
+
+
 # ---------------------------------------------------------------------------
 # Public CLI handler
 # ---------------------------------------------------------------------------
@@ -175,15 +241,17 @@ def cmd_skill(args: list[str]) -> int:
             "Usage:\n"
             "  pwm skill list                          Show tools and installation status\n"
             "  pwm skill install <tool>                Install skill for a tool\n"
+            "  pwm skill install all                   Install for all detected tools\n"
             "  pwm skill install <tool> --level project  Install at project level\n"
             "  pwm skill uninstall <tool>              Remove installed skill\n"
             "  pwm skill show                          Display the skill content\n"
             "  pwm skill update                        Update all outdated skills\n"
             "\n"
-            "Tools: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw\n"
+            "Tools: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw, all\n"
             "\n"
             "Examples:\n"
             "  pwm skill list\n"
+            "  pwm skill install all\n"
             "  pwm skill install claude-code\n"
             "  pwm skill install cursor --level project\n"
             "  pwm skill uninstall gemini-cli\n"
@@ -233,15 +301,22 @@ def cmd_skill(args: list[str]) -> int:
         return 0
 
     if action in ("install", "uninstall"):
-        if len(args) < 2:
-            print(f"Error: pwm skill {action} requires a tool name.", file=sys.stderr)
-            print(f"Available: {', '.join(target_map.keys())}", file=sys.stderr)
-            return 1
+        if len(args) < 2 or args[1] in ("--help", "-h"):
+            avail = f"{', '.join(target_map.keys())}"
+            if action == "install":
+                avail += ", all"
+            print(f"Usage: pwm skill {action} <tool>")
+            print(f"Available: {avail}")
+            return 0
 
         tool_name = args[1]
+
+        if action == "install" and tool_name == "all":
+            return _install_all(targets, current_version)
+
         if tool_name not in target_map:
             print(f"Error: Unknown tool '{tool_name}'.", file=sys.stderr)
-            print(f"Available: {', '.join(target_map.keys())}", file=sys.stderr)
+            print(f"Available: {', '.join(target_map.keys())}, all", file=sys.stderr)
             return 1
 
         target = target_map[tool_name]
@@ -285,9 +360,13 @@ def cmd_skill(args: list[str]) -> int:
             print("Error: Could not find skill source files.", file=sys.stderr)
             return 1
 
-        updated = 0
+        updated_tools: list[str] = []
+        current_tools: list[str] = []
+        not_installed: list[str] = []
+
         for t in targets:
             seen_dests = set()
+            tool_installed = False
             for dest in [t.user_dir, Path.cwd() / t.project_dir]:
                 abs_path = str(dest.absolute())
                 if abs_path in seen_dests:
@@ -295,15 +374,32 @@ def cmd_skill(args: list[str]) -> int:
                 seen_dests.add(abs_path)
 
                 installed_ver = _get_installed_version(dest / SKILL_DIR_NAME)
-                if installed_ver and installed_ver != current_version:
+                if not installed_ver:
+                    continue
+                tool_installed = True
+                if installed_ver != current_version:
                     if _install_skill(source, dest):
-                        print(f"  {t.name}: Updated v{installed_ver} -> v{current_version}")
-                        updated += 1
+                        level = "project" if str(Path.cwd()) in abs_path else "user"
+                        print(f"  ✓ {t.name} ({level}): v{installed_ver} → v{current_version}")
+                        updated_tools.append(t.name)
+                else:
+                    current_tools.append(t.name)
 
-        if updated == 0:
-            print("  All installed skills are up to date.")
+            if not tool_installed:
+                not_installed.append(t.name)
+
+        print()
+        if updated_tools:
+            print(f"  Updated: {', '.join(updated_tools)}")
+        if current_tools:
+            print(f"  Already current: {', '.join(current_tools)}")
+        if not_installed:
+            print(f"  Not installed: {', '.join(not_installed)}")
+
+        if not updated_tools:
+            print(f"\n  All installed skills are up to date (v{current_version}).")
         else:
-            print(f"\n  Updated {updated} skill(s) to v{current_version}.")
+            print(f"\n  Updated {len(updated_tools)} tool(s) to v{current_version}.")
         return 0
 
     print(f"Unknown skill action: {action}", file=sys.stderr)

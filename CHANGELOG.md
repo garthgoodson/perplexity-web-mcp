@@ -4,6 +4,19 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.8.1] - 2026-03-05
+
+### Added
+
+- **`pwm skill install all`** — Install the skill to all detected tools on the system in one command. Detects which AI tools (Claude Code, Cursor, Gemini CLI, etc.) are present and installs to each one, with a summary showing installed, already current, and not detected tools.
+- **`pwm skill install --help`** / **`pwm skill uninstall --help`** — Now shows usage and available tools instead of erroring with "Unknown tool '--help'".
+
+### Changed
+
+- **`pwm skill update` output** — Now shows a full breakdown: updated tools with version transitions, tools already at current version, and tools not installed.
+
+---
+
 ## [0.8.0] - 2026-03-05
 
 ### Added
