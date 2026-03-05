@@ -61,6 +61,7 @@ pwm --ai                                       # AI reference doc
 ## Models
 
 - `auto` / `sonar` / `deep_research`
+- `gpt54` (+ thinking)
 - `gpt52` (+ thinking)
 - `claude_sonnet` / `claude_opus` (+ thinking)
 - `gemini_flash` (+ thinking) / `gemini_pro` (always thinking)

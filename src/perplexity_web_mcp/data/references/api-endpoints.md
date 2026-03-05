@@ -65,6 +65,7 @@ The API server accepts many model name variants:
 | `claude-opus-4-6`, `claude-4-6-opus`, `opus` | Claude 4.6 Opus |
 | `claude-3-5-sonnet` (legacy) | Claude 4.6 Sonnet |
 | `claude-3-opus` (legacy) | Claude 4.6 Opus |
+| `gpt-5.4`, `gpt-54`, `gpt54` | GPT-5.4 |
 | `gpt-5.2`, `gpt-52`, `gpt52` | GPT-5.2 |
 | `gemini-3-flash`, `gemini-flash` | Gemini 3 Flash |
 | `gemini-3.1-pro`, `gemini-3-pro`, `gemini-pro` | Gemini 3.1 Pro |

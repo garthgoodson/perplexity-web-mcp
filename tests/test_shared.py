@@ -30,7 +30,7 @@ class TestMappings:
     """Verify the shared mapping dictionaries are well-formed."""
 
     def test_model_map_has_all_expected_keys(self) -> None:
-        expected = {"auto", "sonar", "deep_research", "gpt52", "claude_sonnet",
+        expected = {"auto", "sonar", "deep_research", "gpt54", "gpt52", "claude_sonnet",
                     "claude_opus", "gemini_flash", "gemini_pro", "grok", "kimi"}
         assert set(MODEL_MAP.keys()) == expected
 

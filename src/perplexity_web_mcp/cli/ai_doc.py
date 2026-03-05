@@ -88,6 +88,7 @@ Name            Identifier              Thinking   Notes
 auto            pplx_pro                No         Auto-selects best model
 sonar           experimental            No         Perplexity's latest
 deep_research   pplx_alpha              No         In-depth reports (monthly quota)
+gpt54           gpt54                   Yes        OpenAI GPT-5.4
 gpt52           gpt52                   Yes        OpenAI GPT-5.2
 claude_sonnet   claude46sonnet          Yes        Anthropic Claude 4.6 Sonnet
 claude_opus     claude46opus            Yes        Anthropic Claude 4.6 Opus (Max tier)
@@ -142,6 +143,8 @@ QUERY TOOLS (14):
       In-depth research report. Uses monthly Deep Research quota.
 
   pplx_sonar(query, source_focus="web")         Perplexity Sonar model
+  pplx_gpt54(query, source_focus="web")          GPT-5.4
+  pplx_gpt54_thinking(query, source_focus="web") GPT-5.4 + thinking
   pplx_gpt52(query, source_focus="web")          GPT-5.2
   pplx_gpt52_thinking(query, source_focus="web") GPT-5.2 + thinking
   pplx_claude_sonnet(query, source_focus="web")   Claude 4.6 Sonnet

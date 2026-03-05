@@ -149,9 +149,12 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     "opus": (Models.CLAUDE_46_OPUS, Models.CLAUDE_46_OPUS_THINKING),
     
     # ==========================================================================
-    # OpenAI GPT-5.2 (via Perplexity) - supports thinking toggle
-    # Note: GPT-4 series deprecated by OpenAI, removed
+    # OpenAI GPT Models (via Perplexity) - support thinking toggle
     # ==========================================================================
+    "gpt-5.4": (Models.GPT_54, Models.GPT_54_THINKING),
+    "gpt-5-4": (Models.GPT_54, Models.GPT_54_THINKING),
+    "gpt-54": (Models.GPT_54, Models.GPT_54_THINKING),
+    "gpt54": (Models.GPT_54, Models.GPT_54_THINKING),
     "gpt-5.2": (Models.GPT_52, Models.GPT_52_THINKING),
     "gpt-5-2": (Models.GPT_52, Models.GPT_52_THINKING),
     "gpt-52": (Models.GPT_52, Models.GPT_52_THINKING),
@@ -199,7 +202,8 @@ AVAILABLE_MODELS = [
     {"id": "gemini-3-flash", "description": "Gemini 3 Flash - Fast, thinking toggle available"},
     {"id": "gemini-3.1-pro", "description": "Gemini 3.1 Pro - Advanced, thinking always on"},
     # OpenAI
-    {"id": "gpt-5.2", "description": "GPT-5.2 - OpenAI's latest, thinking toggle available"},
+    {"id": "gpt-5.4", "description": "GPT-5.4 - OpenAI's latest, thinking toggle available"},
+    {"id": "gpt-5.2", "description": "GPT-5.2 - OpenAI's model, thinking toggle available"},
     # Anthropic Claude
     {"id": "claude-sonnet-4-6", "description": "Claude Sonnet 4.6 - Fast, thinking toggle available"},
     {"id": "claude-opus-4-6", "description": "Claude Opus 4.6 - Advanced reasoning, Max tier required"},

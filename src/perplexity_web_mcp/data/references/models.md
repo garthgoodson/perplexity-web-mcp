@@ -25,7 +25,13 @@ Complete list of models available through Perplexity Web MCP.
 - **MCP:** `pplx_deep_research(query)` or `pplx_query(query, model="deep_research")`
 - **Notes:** Produces in-depth reports with charts and extensive sources. Uses a separate **monthly** quota (not the weekly Pro Search pool). Use sparingly.
 
-### gpt52 (OpenAI GPT-5.2)
+### gpt54 (OpenAI GPT-5.4)
+- **Identifier:** `gpt54` / `gpt54_thinking`
+- **Thinking:** Toggle (use `-t` flag or `thinking=True`)
+- **CLI:** `pwm ask "query" -m gpt54` or `pwm ask "query" -m gpt54 -t`
+- **MCP:** `pplx_gpt54(query)` or `pplx_gpt54_thinking(query)`
+
+### gpt52 (OpenAI's model)
 - **Identifier:** `gpt52` / `gpt52_thinking`
 - **Thinking:** Toggle (use `-t` flag or `thinking=True`)
 - **CLI:** `pwm ask "query" -m gpt52` or `pwm ask "query" -m gpt52 -t`

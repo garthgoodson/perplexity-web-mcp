@@ -62,8 +62,8 @@ def pplx_query(
 
     Args:
         query: The question to ask
-        model: Model to use - auto, sonar, deep_research, gpt52, claude_sonnet,
-               claude_opus, gemini_flash, gemini_pro, grok, kimi
+        model: Model to use - auto, sonar, deep_research, gpt54, gpt52,
+               claude_sonnet, claude_opus, gemini_flash, gemini_pro, grok, kimi
         thinking: Enable extended thinking mode (available for gpt52, claude_sonnet,
                   claude_opus, gemini_flash, grok)
         source_focus: Source type - none (model only, no search), web, academic,
@@ -92,14 +92,26 @@ def pplx_sonar(query: str, source_focus: SourceFocusName = "web") -> str:
 
 
 @mcp.tool
+def pplx_gpt54(query: str, source_focus: SourceFocusName = "web") -> str:
+    """GPT-5.4 - OpenAI's latest model."""
+    return ask(query, Models.GPT_54, source_focus)
+
+
+@mcp.tool
+def pplx_gpt54_thinking(query: str, source_focus: SourceFocusName = "web") -> str:
+    """GPT-5.4 Thinking - OpenAI's latest model with extended thinking."""
+    return ask(query, Models.GPT_54_THINKING, source_focus)
+
+
+@mcp.tool
 def pplx_gpt52(query: str, source_focus: SourceFocusName = "web") -> str:
-    """GPT-5.2 - OpenAI's latest model."""
+    """GPT-5.2 - OpenAI's model."""
     return ask(query, Models.GPT_52, source_focus)
 
 
 @mcp.tool
 def pplx_gpt52_thinking(query: str, source_focus: SourceFocusName = "web") -> str:
-    """GPT-5.2 Thinking - OpenAI's latest model with extended thinking."""
+    """GPT-5.2 Thinking - OpenAI's model with extended thinking."""
     return ask(query, Models.GPT_52_THINKING, source_focus)
 
 

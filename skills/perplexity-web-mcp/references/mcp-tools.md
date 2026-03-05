@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Complete parameter reference for all 17 MCP tools in the `pplx_*` namespace.
+Complete parameter reference for all 19 MCP tools in the `pplx_*` namespace.
 
 ## Query Tools
 
@@ -11,7 +11,7 @@ Flexible model selection with thinking toggle. The most versatile tool.
 ```
 pplx_query(
     query: str,                    # Required. The question to ask.
-    model: str = "auto",           # auto, sonar, deep_research, gpt52, claude_sonnet,
+    model: str = "auto",           # auto, sonar, deep_research, gpt54, gpt52, claude_sonnet,
                                    # claude_opus, gemini_flash, gemini_pro, grok, kimi
     thinking: bool = False,        # Enable extended thinking (where supported)
     source_focus: str = "web",     # web, academic, social, finance, all
@@ -54,6 +54,8 @@ pplx_<model>(
 | Tool | Model | Thinking |
 |------|-------|----------|
 | `pplx_sonar` | Perplexity Sonar | No |
+| `pplx_gpt54` | GPT-5.4 | No |
+| `pplx_gpt54_thinking` | GPT-5.4 | Yes |
 | `pplx_gpt52` | GPT-5.2 | No |
 | `pplx_gpt52_thinking` | GPT-5.2 | Yes |
 | `pplx_claude_sonnet` | Claude 4.6 Sonnet | No |

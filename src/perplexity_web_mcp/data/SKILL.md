@@ -5,10 +5,10 @@ description: >-
   Supports CLI commands (pwm ask, pwm research), MCP tools (pplx_*), and
   Anthropic/OpenAI-compatible API server. Use when the user mentions "perplexity",
   "pplx", "pwm", "web search with AI", "deep research", "search the internet",
-  or wants to query premium models like GPT-5.2, Claude, Gemini, Grok through
+  or wants to query premium models like GPT-5.4, GPT-5.2, Claude, Gemini, Grok through
   Perplexity's web interface.
 metadata:
-  version: "0.7.2"
+  version: "0.8.0"
   author: "Jacob BD"
 ---
 
@@ -92,15 +92,15 @@ User wants to...
 +-- Search the web / ask a question (RECOMMENDED: smart routing)
 |   +-- CLI:  pwm ask "query"                    # smart routing (default)
 |   +-- MCP:  pplx_smart_query(query)            # smart routing (default)
-|   +-- Explicit model: pwm ask "query" -m gpt52  or  pplx_query(query, model="gpt52")
+|   +-- Explicit model: pwm ask "query" -m gpt54  or  pplx_query(query, model="gpt54")
 |
 +-- Deep research on a topic
 |   +-- CLI:  pwm research "query"
 |   +-- MCP:  pplx_deep_research(query)
 |
 +-- Use a specific model
-|   +-- CLI:  pwm ask "query" -m gpt52 --thinking
-|   +-- MCP:  pplx_gpt52_thinking(query)  or  pplx_query(query, model="gpt52", thinking=True)
+|   +-- CLI:  pwm ask "query" -m gpt54 --thinking
+|   +-- MCP:  pplx_gpt54_thinking(query)  or  pplx_query(query, model="gpt54", thinking=True)
 |
 +-- Check remaining quotas
 |   +-- CLI:  pwm usage
@@ -128,7 +128,7 @@ pwm ask "What is quantum computing?"
 
 Choose a specific model with `-m`:
 ```bash
-pwm ask "Compare React and Vue" -m gpt52
+pwm ask "Compare React and Vue" -m gpt54
 pwm ask "Explain attention mechanism" -m claude_sonnet
 ```
 
@@ -192,6 +192,7 @@ pwm usage --refresh         # Force-refresh from server
 | `pplx_ask` | Quick Q&A (auto model) |
 | `pplx_deep_research` | In-depth reports (monthly quota) |
 | `pplx_sonar` | Perplexity Sonar model |
+| `pplx_gpt54` / `_thinking` | OpenAI GPT-5.4 |
 | `pplx_gpt52` / `_thinking` | OpenAI GPT-5.2 |
 | `pplx_claude_sonnet` / `_think` | Anthropic Claude 4.6 Sonnet |
 | `pplx_gemini_flash` / `_think` | Google Gemini 3 Flash |
@@ -215,6 +216,7 @@ For full MCP tool parameters: See [references/mcp-tools.md](references/mcp-tools
 | auto | Perplexity | No | Auto-selects best |
 | sonar | Perplexity | No | Latest Perplexity model |
 | deep_research | Perplexity | No | Monthly quota |
+| gpt54 | OpenAI | Toggle | GPT-5.4 |
 | gpt52 | OpenAI | Toggle | GPT-5.2 |
 | claude_sonnet | Anthropic | Toggle | Claude 4.6 Sonnet |
 | claude_opus | Anthropic | Toggle | Claude 4.6 Opus (Max tier) |
@@ -260,7 +262,7 @@ pwm ask "Write a Python decorator for retry logic" -m claude_sonnet -s none
 
 ### Specific model
 ```bash
-pwm ask "Compare React and Vue" -m gpt52
+pwm ask "Compare React and Vue" -m gpt54
 ```
 
 ### Model with thinking
