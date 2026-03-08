@@ -1,369 +1,733 @@
-"""MCP server setup for AI tools.
+"""MCP server setup commands for AI tool clients.
 
-Handles adding/removing the perplexity-web-mcp MCP server configuration
-to various AI tool config files (Claude Code, Claude Desktop, Cursor, etc.).
+Configures the perplexity-web-mcp MCP server in various AI tool config files,
+so the tools can use Perplexity via MCP protocol.
+
+Usage:
+    pwm setup add cursor
+    pwm setup add claude-desktop
+    pwm setup list
+    pwm setup remove cursor
 """
 
-from __future__ import annotations
-
 import json
+import os
 import platform
 import shutil
 import subprocess
-import sys
-from dataclasses import dataclass
 from pathlib import Path
 
+import rich_click as click
+from rich.console import Console
+from rich.prompt import Confirm, Prompt
+from rich.syntax import Syntax
+from rich.table import Table
 
-MCP_SERVER_NAME = "perplexity"
-MCP_COMMAND = "pwm-mcp"
+console = Console()
+
+# MCP server command - the binary that clients will execute
+MCP_SERVER_CMD = "pwm-mcp"
+MCP_SERVER_KEY = "perplexity"
 MCP_PACKAGE = "perplexity-web-mcp-cli"
 
 
-@dataclass(frozen=True)
-class AITool:
-    """An AI tool that supports MCP server configuration."""
-
-    name: str
-    description: str
-    config_path: Path | None
-    config_hint: str
-    uses_cli: bool = False
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _home() -> Path:
-    return Path.home()
-
-
-def _get_tools() -> list[AITool]:
-    """Return the list of supported AI tools with their config paths."""
-    home = _home()
-    return [
-        AITool(
-            name="claude-code",
-            description="Anthropic Claude Code CLI",
-            config_path=None,
-            config_hint="claude mcp list",
-            uses_cli=True,
-        ),
-        AITool(
-            name="claude-desktop",
-            description="Claude desktop application",
-            config_path=home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
-            config_hint=str(home / "Library/Application Support/Claude/claude_desktop_config.json"),
-        ),
-        AITool(
-            name="gemini",
-            description="Google Gemini CLI",
-            config_path=home / ".gemini" / "settings.json",
-            config_hint=str(home / ".gemini/settings.json"),
-        ),
-        AITool(
-            name="cursor",
-            description="Cursor AI editor",
-            config_path=home / ".cursor" / "mcp.json",
-            config_hint=str(home / ".cursor/mcp.json"),
-        ),
-        AITool(
-            name="windsurf",
-            description="Codeium Windsurf editor",
-            config_path=home / ".codeium" / "windsurf" / "mcp_config.json",
-            config_hint=str(home / ".codeium/windsurf/mcp_config.json"),
-        ),
-        AITool(
-            name="cline",
-            description="Cline CLI terminal agent",
-            config_path=home / ".cline" / "data" / "settings" / "cline_mcp_settings.json",
-            config_hint=str(home / ".cline/data/settings/cline_mcp_settings.json"),
-        ),
-        AITool(
-            name="antigravity",
-            description="Google Antigravity AI IDE",
-            config_path=home / ".gemini" / "antigravity" / "mcp_config.json",
-            config_hint=str(home / ".gemini/antigravity/mcp_config.json"),
-        ),
-    ]
-
-
-def _find_pwm_mcp() -> str:
-    """Find the pwm-mcp binary path."""
-    path = shutil.which(MCP_COMMAND)
-    if path:
-        return path
-    return MCP_COMMAND
-
-
-def _is_configured_cli(tool: AITool) -> bool:
-    """Check if MCP is configured via Claude Code CLI."""
+def _read_json_config(path: Path) -> dict:
+    """Read a JSON config file, returning empty dict if missing or invalid."""
+    if not path.exists():
+        return {}
     try:
-        result = subprocess.run(
-            ["claude", "mcp", "list"], capture_output=True, text=True, timeout=5
-        )
-        return MCP_SERVER_NAME in result.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def _is_configured_file(tool: AITool) -> bool:
-    """Check if MCP is configured in a JSON config file."""
-    if tool.config_path is None or not tool.config_path.exists():
-        return False
-    try:
-        data = json.loads(tool.config_path.read_text(encoding="utf-8"))
-        servers = data.get("mcpServers", {})
-        return MCP_SERVER_NAME in servers
+        return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
-        return False
+        return {}
 
 
-def _is_configured(tool: AITool) -> bool:
-    """Check if MCP server is configured for a tool."""
-    if tool.uses_cli:
-        return _is_configured_cli(tool)
-    return _is_configured_file(tool)
+def _write_json_config(path: Path, config: dict) -> None:
+    """Write a JSON config file, creating parent dirs as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2) + "\n")
 
 
-def _add_cli(tool: AITool) -> bool:
-    """Add MCP server via Claude Code CLI (user scope)."""
-    try:
-        result = subprocess.run(
-            ["claude", "mcp", "add", "-s", "user", MCP_SERVER_NAME, "--", MCP_COMMAND],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+def _is_configured(config: dict, key: str = MCP_SERVER_KEY) -> bool:
+    """Check if perplexity MCP is already in an mcpServers config."""
+    servers = config.get("mcpServers", {})
+    return key in servers
 
 
-def _remove_cli(tool: AITool) -> bool:
-    """Remove MCP server via Claude Code CLI (user scope)."""
-    try:
-        result = subprocess.run(
-            ["claude", "mcp", "remove", "-s", "user", MCP_SERVER_NAME],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+def _add_mcp_server(config: dict, key: str = MCP_SERVER_KEY, extra: dict | None = None) -> dict:
+    """Add perplexity MCP to an mcpServers config dict."""
+    config.setdefault("mcpServers", {})
+    entry = {"command": MCP_SERVER_CMD, "args": []}
+    if extra:
+        entry.update(extra)
+    config["mcpServers"][key] = entry
+    return config
 
 
-def _build_server_entry(tool: AITool) -> dict:
-    """Build the MCP server JSON entry for a tool."""
-    cmd_path = _find_pwm_mcp()
-    entry: dict = {"command": cmd_path, "args": []}
-    if tool.name == "gemini":
-        entry["trust"] = True
-    return entry
-
-
-def _add_file(tool: AITool) -> bool:
-    """Add MCP server to a JSON config file."""
-    if tool.config_path is None:
-        return False
-
-    server_entry = _build_server_entry(tool)
-
-    try:
-        if tool.config_path.exists():
-            data = json.loads(tool.config_path.read_text(encoding="utf-8"))
-        else:
-            tool.config_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
-
-        if "mcpServers" not in data:
-            data["mcpServers"] = {}
-
-        data["mcpServers"][MCP_SERVER_NAME] = server_entry
-        tool.config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+def _remove_mcp_server(config: dict, key: str = MCP_SERVER_KEY) -> bool:
+    """Remove perplexity MCP from an mcpServers config dict. Returns True if removed."""
+    servers = config.get("mcpServers", {})
+    if key in servers:
+        del servers[key]
         return True
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"  Error writing config: {e}", file=sys.stderr)
-        return False
+    return False
 
 
-def _remove_file(tool: AITool) -> bool:
-    """Remove MCP server from a JSON config file."""
-    if tool.config_path is None or not tool.config_path.exists():
+# ── Config paths (platform-specific) ───────────────────────────────────────
+
+
+def _claude_desktop_config_path() -> Path:
+    system = platform.system()
+    if system == "Darwin":
+        return (
+            Path.home() / "Library" / "Application Support" / "Claude"
+            / "claude_desktop_config.json"
+        )
+    elif system == "Windows":
+        return Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+    else:
+        return Path.home() / ".config" / "claude" / "claude_desktop_config.json"
+
+
+def _gemini_config_path() -> Path:
+    return Path.home() / ".gemini" / "settings.json"
+
+
+def _cursor_config_path() -> Path:
+    system = platform.system()
+    if system == "Darwin":
+        return Path.home() / ".cursor" / "mcp.json"
+    elif system == "Windows":
+        return Path(os.environ.get("APPDATA", "")) / "Cursor" / "User" / "mcp.json"
+    else:
+        return Path.home() / ".config" / "cursor" / "mcp.json"
+
+
+def _windsurf_config_path() -> Path:
+    system = platform.system()
+    if system == "Darwin":
+        return Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
+    elif system == "Windows":
+        return Path(os.environ.get("APPDATA", "")) / "Codeium" / "windsurf" / "mcp_config.json"
+    else:
+        return Path.home() / ".config" / "codeium" / "windsurf" / "mcp_config.json"
+
+
+def _cline_config_path() -> Path:
+    return Path.home() / ".cline" / "data" / "settings" / "cline_mcp_settings.json"
+
+
+def _antigravity_config_path() -> Path:
+    return Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
+
+
+# ── Client registry ────────────────────────────────────────────────────────
+
+
+CLIENT_REGISTRY = {
+    "claude-code": {
+        "name": "Claude Code",
+        "description": "Anthropic CLI (claude command)",
+        "config_fn": None,  # Uses claude mcp add
+    },
+    "gemini": {
+        "name": "Gemini CLI",
+        "description": "Google Gemini CLI",
+        "config_fn": _gemini_config_path,
+        "extra": {"trust": True},
+    },
+    "cursor": {
+        "name": "Cursor",
+        "description": "Cursor AI editor",
+        "config_fn": _cursor_config_path,
+    },
+    "windsurf": {
+        "name": "Windsurf",
+        "description": "Codeium Windsurf editor",
+        "config_fn": _windsurf_config_path,
+    },
+    "cline": {
+        "name": "Cline CLI",
+        "description": "Cline CLI terminal agent",
+        "config_fn": _cline_config_path,
+    },
+    "antigravity": {
+        "name": "Antigravity",
+        "description": "Google Antigravity AI IDE",
+        "config_fn": _antigravity_config_path,
+    },
+    "codex": {
+        "name": "Codex",
+        "description": "OpenAI Codex CLI agent (skill-based)",
+        "config_fn": None,  # Uses skill file via pwm skill install codex
+    },
+}
+
+VALID_CLIENTS = list(CLIENT_REGISTRY.keys())
+
+
+# ── Setup implementations ──────────────────────────────────────────────────
+
+
+def _setup_claude_code() -> bool:
+    """Add MCP to Claude Code via `claude mcp add`."""
+    claude_cmd = shutil.which("claude")
+    if not claude_cmd:
+        console.print("[yellow]Warning:[/yellow] 'claude' command not found in PATH")
+        console.print("  Install Claude Code: https://docs.anthropic.com/en/docs/claude-code")
         return False
 
     try:
-        data = json.loads(tool.config_path.read_text(encoding="utf-8"))
-        servers = data.get("mcpServers", {})
-        if MCP_SERVER_NAME in servers:
-            del servers[MCP_SERVER_NAME]
-            tool.config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [claude_cmd, "mcp", "add", "-s", "user", MCP_SERVER_KEY, "--", MCP_SERVER_CMD],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            console.print("[green]✓[/green] Added to Claude Code (user scope)")
             return True
+        elif "already exists" in result.stderr.lower():
+            console.print("[green]✓[/green] Already configured in Claude Code")
+            return True
+        else:
+            console.print(f"[yellow]Warning:[/yellow] {result.stderr.strip()}")
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        console.print(f"[yellow]Warning:[/yellow] Could not run claude command: {e}")
         return False
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"  Error writing config: {e}", file=sys.stderr)
+
+
+def _setup_json_client(client_id: str) -> bool:
+    """Add MCP to a JSON config-based client."""
+    info = CLIENT_REGISTRY[client_id]
+    config_fn = info["config_fn"]
+    key = info.get("key", MCP_SERVER_KEY)
+    extra = info.get("extra")
+
+    config_path = config_fn()
+    config = _read_json_config(config_path)
+
+    if _is_configured(config, key):
+        console.print(f"[green]✓[/green] Already configured in {info['name']}")
+        return True
+
+    _add_mcp_server(config, key=key, extra=extra)
+    _write_json_config(config_path, config)
+    console.print(f"[green]✓[/green] Added to {info['name']}")
+    console.print(f"  [dim]{config_path}[/dim]")
+    return True
+
+
+def _remove_claude_code() -> bool:
+    """Remove MCP from Claude Code."""
+    claude_cmd = shutil.which("claude")
+    if not claude_cmd:
+        console.print("[yellow]Warning:[/yellow] 'claude' command not found")
+        return False
+
+    try:
+        result = subprocess.run(
+            [claude_cmd, "mcp", "remove", "-s", "user", MCP_SERVER_KEY],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            console.print("[green]✓[/green] Removed from Claude Code")
+            return True
+        else:
+            console.print(f"[yellow]Note:[/yellow] {result.stderr.strip()}")
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        console.print(f"[yellow]Warning:[/yellow] {e}")
         return False
 
 
-# ---------------------------------------------------------------------------
-# Interactive JSON generator
-# ---------------------------------------------------------------------------
+def _remove_json_client(client_id: str) -> bool:
+    """Remove MCP from a JSON config-based client."""
+    info = CLIENT_REGISTRY[client_id]
+    config_fn = info["config_fn"]
+    key = info.get("key", MCP_SERVER_KEY)
 
-def _prompt_choice(prompt: str, choices: list[tuple[str, str]]) -> str:
-    """Prompt the user to pick from numbered choices. Returns the key."""
-    print(prompt)
-    for i, (key, label) in enumerate(choices, 1):
-        print(f"  {i}. {label}")
-    while True:
-        try:
-            raw = input("> ").strip()
-            idx = int(raw) - 1
-            if 0 <= idx < len(choices):
-                return choices[idx][0]
-        except (ValueError, EOFError, KeyboardInterrupt):
-            pass
-        print(f"  Enter 1-{len(choices)}")
+    config_path = config_fn()
+    if not config_path.exists():
+        console.print(f"[dim]No config file found for {info['name']}.[/dim]")
+        return False
+
+    config = _read_json_config(config_path)
+    if _remove_mcp_server(config, key):
+        _write_json_config(config_path, config)
+        console.print(f"[green]✓[/green] Removed from {info['name']}")
+        return True
+    else:
+        console.print(f"[dim]Perplexity MCP was not configured in {info['name']}.[/dim]")
+        return False
 
 
-def _setup_json() -> int:
-    """Interactive JSON config generator for any MCP client."""
-    print("Generate MCP JSON config\n")
-    print("Creates a JSON snippet you can paste into any tool's MCP config.\n")
+def _find_mcp_server_path() -> str | None:
+    """Find the full path to the pwm-mcp binary."""
+    return shutil.which(MCP_SERVER_CMD)
 
-    config_type = _prompt_choice("Config type:", [
+
+def _prompt_numbered(prompt_text: str, options: list[tuple[str, str]], default: int = 1) -> str:
+    """Show a numbered prompt and return the chosen option value."""
+    console.print(f"{prompt_text}")
+    for i, (_value, label) in enumerate(options, 1):
+        marker = " [dim](default)[/dim]" if i == default else ""
+        console.print(f"  [cyan]{i}[/cyan]) {label}{marker}")
+
+    valid = [str(i) for i in range(1, len(options) + 1)]
+    choice = Prompt.ask("Choose", choices=valid, default=str(default), show_choices=False)
+    return options[int(choice) - 1][0]
+
+
+def _setup_json() -> None:
+    """Interactive flow to generate MCP JSON config for any tool."""
+    console.print("[bold]Generate MCP JSON config[/bold]\n")
+    console.print("This generates a JSON snippet you can paste into any tool's MCP config.\n")
+
+    config_type = _prompt_numbered("Config type:", [
         ("uvx", "uvx (no install required)"),
         ("regular", "Regular (uses installed binary)"),
     ])
 
     use_full_path = False
     if config_type == "regular":
-        path_choice = _prompt_choice("Command format:", [
-            ("name", f"Command name ({MCP_COMMAND})"),
+        path_choice = _prompt_numbered("\nCommand format:", [
+            ("name", f"Command name ({MCP_SERVER_CMD})"),
             ("full", "Full path to binary"),
         ])
         use_full_path = path_choice == "full"
 
-    config_scope = _prompt_choice("Config scope:", [
+    config_scope = _prompt_numbered("\nConfig scope:", [
         ("existing", "Add to existing config (server entry only)"),
         ("new", "New config file (includes mcpServers wrapper)"),
     ])
 
+    # Build the server entry
     if config_type == "uvx":
         server_entry = {
             "command": "uvx",
-            "args": ["--from", MCP_PACKAGE, MCP_COMMAND],
+            "args": ["--from", MCP_PACKAGE, MCP_SERVER_CMD],
         }
-    elif use_full_path:
-        binary_path = _find_pwm_mcp()
-        if binary_path == MCP_COMMAND:
-            print(f"  Warning: {MCP_COMMAND} not found in PATH, using command name")
-        server_entry = {"command": binary_path}
     else:
-        server_entry = {"command": MCP_COMMAND}
+        if use_full_path:
+            binary_path = _find_mcp_server_path()
+            if not binary_path:
+                console.print(
+                    f"\n[yellow]Warning:[/yellow] {MCP_SERVER_CMD} not found in PATH, "
+                    "using command name instead"
+                )
+                binary_path = MCP_SERVER_CMD
+            server_entry = {"command": binary_path}
+        else:
+            server_entry = {"command": MCP_SERVER_CMD}
 
     if config_scope == "new":
-        output = {"mcpServers": {MCP_SERVER_NAME: server_entry}}
+        output = {"mcpServers": {MCP_SERVER_KEY: server_entry}}
     else:
-        output = {MCP_SERVER_NAME: server_entry}
+        output = {MCP_SERVER_KEY: server_entry}
 
     json_str = json.dumps(output, indent=2)
 
-    print(f"\n{json_str}\n")
+    console.print()
+    console.print(Syntax(json_str, "json", theme="monokai", padding=1))
+    console.print()
 
     if platform.system() == "Darwin":
-        try:
-            answer = input("Copy to clipboard? [Y/n] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        if answer in ("", "y", "yes"):
+        if Confirm.ask("Copy to clipboard?", default=True):
             try:
                 subprocess.run(
-                    ["pbcopy"], input=json_str.encode(), check=True, timeout=5,
+                    ["pbcopy"],
+                    input=json_str.encode(),
+                    check=True,
+                    timeout=5,
                 )
-                print("  Copied to clipboard.")
+                console.print("[green]✓[/green] Copied to clipboard")
             except (subprocess.SubprocessError, OSError):
-                print("  Could not copy to clipboard.")
-
-    return 0
+                console.print("[yellow]Warning:[/yellow] Could not copy to clipboard")
 
 
-# ---------------------------------------------------------------------------
-# Public CLI handlers
-# ---------------------------------------------------------------------------
-
-_ALL_CLIENTS = "claude-code, claude-desktop, gemini, cursor, windsurf, cline, antigravity, json"
+# ── Tool detection & status ─────────────────────────────────────────────────
 
 
-def cmd_setup(args: list[str]) -> int:
-    """Handle: pwm setup [add|remove|list] [client]"""
-    if not args or args[0] in ("--help", "-h"):
-        print(
-            "pwm setup - Configure MCP server for AI tools\n"
-            "\n"
-            "Usage:\n"
-            "  pwm setup list                  Show supported tools and MCP status\n"
-            "  pwm setup add <client>          Add MCP server to a tool\n"
-            "  pwm setup add json              Generate JSON config for manual setup\n"
-            "  pwm setup remove <client>       Remove MCP server from a tool\n"
-            "\n"
-            f"Clients: {_ALL_CLIENTS}\n"
-            "\n"
-            "Examples:\n"
-            "  pwm setup list\n"
-            "  pwm setup add claude-code\n"
-            "  pwm setup add cursor\n"
-            "  pwm setup add antigravity\n"
-            "  pwm setup add json              # Interactive JSON generator\n"
-            "  pwm setup remove windsurf\n"
-        )
-        return 0
+def _detect_tool(client_id: str) -> bool:
+    """Check if an AI tool is installed/present on the system."""
+    checks = {
+        "claude-code": lambda: shutil.which("claude") is not None,
+        "gemini": lambda: (
+            shutil.which("gemini") is not None
+            or _gemini_config_path().parent.exists()
+        ),
+        "cursor": lambda: Path.home().joinpath(".cursor").exists(),
+        "windsurf": lambda: _windsurf_config_path().parent.exists(),
+        "cline": lambda: Path.home().joinpath(".cline").exists(),
+        "antigravity": lambda: _antigravity_config_path().parent.exists(),
+        "codex": lambda: shutil.which("codex") is not None,
+    }
+    check_fn = checks.get(client_id)
+    if not check_fn:
+        return False
+    try:
+        return check_fn()
+    except Exception:
+        return False
 
-    action = args[0]
-    tools = _get_tools()
-    tool_map = {t.name: t for t in tools}
 
-    if action == "list":
-        print("\nPerplexity Web MCP Server Configuration\n")
-        print(f"{'Client':<18} {'Description':<28} {'MCP Status':<12} {'Config Path'}")
-        print(f"{'─' * 18} {'─' * 28} {'─' * 12} {'─' * 35}")
-        for t in tools:
-            status = "  ✓  " if _is_configured(t) else "  -  "
-            print(f"{t.name:<18} {t.description:<28} {status:<12} {t.config_hint}")
-        print(f"\nAdd MCP server:    pwm setup add <client>")
-        print(f"Generate JSON:     pwm setup add json")
-        print(f"Install skills:    pwm skill install <tool>")
-        return 0
+def _is_already_configured(client_id: str) -> bool:
+    """Check if MCP is already configured for a client."""
+    try:
+        if client_id == "claude-code":
+            claude_cmd = shutil.which("claude")
+            if claude_cmd:
+                result = subprocess.run(
+                    [claude_cmd, "mcp", "list"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                return MCP_SERVER_KEY in result.stdout.lower()
+            return False
+        elif client_id == "codex":
+            return False  # Skill-based, not MCP config
+        else:
+            info = CLIENT_REGISTRY[client_id]
+            config_fn = info.get("config_fn")
+            if not config_fn:
+                return False
+            key = info.get("key", MCP_SERVER_KEY)
+            config = _read_json_config(config_fn())
+            return _is_configured(config, key)
+    except Exception:
+        pass
+    return False
 
-    if action in ("add", "remove"):
-        if len(args) < 2:
-            print(f"Error: pwm setup {action} requires a client name.", file=sys.stderr)
-            print(f"Available: {_ALL_CLIENTS}", file=sys.stderr)
-            return 1
 
-        client_name = args[1]
+# ── Multi-tool setup / remove ──────────────────────────────────────────────
 
-        if action == "add" and client_name == "json":
-            return _setup_json()
 
-        if client_name not in tool_map:
-            print(f"Error: Unknown client '{client_name}'.", file=sys.stderr)
-            print(f"Available: {_ALL_CLIENTS}", file=sys.stderr)
-            return 1
+def _setup_all() -> None:
+    """Interactive multi-tool setup. Scans system for AI tools and lets user choose."""
+    console.print("\n[bold]Scanning for AI tools...[/bold]\n")
 
-        tool = tool_map[client_name]
+    detected = []  # (client_id, info, is_configured, has_auto)
+    not_found = []
 
-        if action == "add":
-            if _is_configured(tool):
-                print(f"  {tool.name}: Already configured.")
-                return 0
-            ok = _add_cli(tool) if tool.uses_cli else _add_file(tool)
-            if ok:
-                print(f"  {tool.name}: MCP server added successfully.")
-                return 0
-            print(f"  {tool.name}: Failed to add MCP server.", file=sys.stderr)
-            return 1
+    for client_id, info in CLIENT_REGISTRY.items():
+        is_present = _detect_tool(client_id)
+        has_auto = info.get("config_fn") is not None or client_id == "claude-code"
+        if is_present:
+            already = _is_already_configured(client_id) if has_auto else False
+            detected.append((client_id, info, already, has_auto))
+        else:
+            not_found.append((client_id, info))
 
-        if action == "remove":
-            ok = _remove_cli(tool) if tool.uses_cli else _remove_file(tool)
-            if ok:
-                print(f"  {tool.name}: MCP server removed.")
-                return 0
-            print(f"  {tool.name}: Not configured or failed to remove.", file=sys.stderr)
-            return 1
+    # Display results table
+    table = Table(title="Detected AI Tools")
+    table.add_column("#", justify="right", style="cyan", width=3)
+    table.add_column("Tool", style="bold")
+    table.add_column("Status", justify="center")
 
-    print(f"Unknown setup action: {action}", file=sys.stderr)
-    return 1
+    configurable = []
+    for i, (client_id, info, already, has_auto) in enumerate(detected):
+        num = str(i + 1)
+        if not has_auto:
+            table.add_row(num, info["name"], "[dim]use pwm skill install[/dim]")
+        elif already:
+            table.add_row(num, info["name"], "[green]✓ configured[/green]")
+        else:
+            table.add_row(num, info["name"], "[yellow]detected[/yellow]")
+            configurable.append(i)
+
+    console.print(table)
+
+    if not_found:
+        names = ", ".join(info["name"] for _, info in not_found)
+        console.print(f"\n[dim]Not found: {names}[/dim]")
+
+    if not configurable:
+        if detected:
+            console.print("\n[green]All detected tools are already configured! ✓[/green]")
+        else:
+            console.print("\n[yellow]No supported AI tools detected on your system.[/yellow]")
+            console.print("[dim]Use 'pwm setup add <client>' to configure a specific tool.[/dim]")
+        return
+
+    # Interactive selection
+    unconfigured_names = [
+        f"{detected[i][1]['name']} ({detected[i][0]})"
+        for i in configurable
+    ]
+    console.print(f"\n[bold]Unconfigured tools:[/bold] {', '.join(unconfigured_names)}")
+    console.print()
+
+    choice = Prompt.ask(
+        "Configure which tools? [cyan]all[/cyan] / comma-separated numbers / [cyan]none[/cyan]",
+        default="all",
+    ).strip().lower()
+
+    if choice in ("none", "n"):
+        console.print("Cancelled.")
+        return
+
+    if choice in ("all", "a", "yes", "y"):
+        selected_indices = configurable
+    else:
+        try:
+            nums = [int(n.strip()) for n in choice.split(",")]
+            selected_indices = []
+            for n in nums:
+                idx = n - 1
+                if idx in configurable:
+                    selected_indices.append(idx)
+                else:
+                    console.print(f"[yellow]Skipping #{n} — already configured or invalid[/yellow]")
+        except ValueError:
+            console.print("[red]Invalid input. Use 'all', 'none', or comma-separated numbers.[/red]")
+            return
+
+    if not selected_indices:
+        console.print("[dim]Nothing to configure.[/dim]")
+        return
+
+    # Execute setup
+    console.print()
+    success_count = 0
+    for idx in selected_indices:
+        client_id = detected[idx][0]
+        if client_id == "claude-code":
+            if _setup_claude_code():
+                success_count += 1
+        elif CLIENT_REGISTRY[client_id].get("config_fn"):
+            if _setup_json_client(client_id):
+                success_count += 1
+
+    console.print(f"\n[green]✓ Configured {success_count} tool(s)[/green]")
+    if success_count > 0:
+        console.print("[dim]Restart the configured tools to activate the MCP server.[/dim]")
+
+
+def _remove_all() -> None:
+    """Remove MCP from all configured tools with explicit confirmation."""
+    console.print("\n[bold]Scanning for configured tools...[/bold]\n")
+
+    configured = []
+    for client_id, info in CLIENT_REGISTRY.items():
+        has_auto = info.get("config_fn") is not None or client_id == "claude-code"
+        if not has_auto:
+            continue
+        if _is_already_configured(client_id):
+            configured.append((client_id, info))
+
+    if not configured:
+        console.print("[dim]No tools have Perplexity MCP configured.[/dim]")
+        return
+
+    # Show what will be removed
+    table = Table(title="Configured Tools")
+    table.add_column("#", justify="right", style="cyan", width=3)
+    table.add_column("Tool", style="bold")
+
+    for i, (client_id, info) in enumerate(configured):
+        table.add_row(str(i + 1), info["name"])
+
+    console.print(table)
+
+    # Confirm removal
+    console.print()
+    console.print("[bold red]⚠  WARNING:[/bold red] This will remove the Perplexity MCP server")
+    console.print(f"from [bold]{len(configured)}[/bold] tool(s) listed above.")
+    console.print()
+
+    if not Confirm.ask(
+        "[bold]Are you sure you want to remove MCP from ALL configured tools?[/bold]",
+        default=False,
+    ):
+        console.print("Cancelled.")
+        return
+
+    # Execute removal
+    console.print()
+    removed_count = 0
+    for client_id, info in configured:
+        if client_id == "claude-code":
+            if _remove_claude_code():
+                removed_count += 1
+        else:
+            if _remove_json_client(client_id):
+                removed_count += 1
+
+    console.print(f"\n[green]✓ Removed from {removed_count} tool(s)[/green]")
+    if removed_count > 0:
+        console.print("[dim]Restart the affected tools to apply changes.[/dim]")
+
+
+# ── Click commands ──────────────────────────────────────────────────────────
+
+
+@click.group()
+def setup():
+    """Configure Perplexity MCP server for AI tools."""
+
+
+@setup.command("add")
+@click.argument("client")
+def setup_add(client):
+    """Add Perplexity MCP server to an AI tool.
+
+    Supported clients: claude-code, gemini, cursor,
+    windsurf, cline, antigravity, codex, json, all.
+
+    \b
+    Examples:
+      pwm setup add cursor
+      pwm setup add claude-code
+      pwm setup add gemini
+      pwm setup add antigravity
+      pwm setup add json
+      pwm setup add all
+    """
+    if client == "json":
+        _setup_json()
+        return
+
+    if client == "all":
+        _setup_all()
+        return
+
+    if client not in CLIENT_REGISTRY:
+        valid = ", ".join(list(CLIENT_REGISTRY.keys()) + ["json", "all"])
+        console.print(f"[red]Error:[/red] Unknown client '{client}'")
+        console.print(f"Available clients: {valid}")
+        raise SystemExit(1)
+
+    info = CLIENT_REGISTRY[client]
+    console.print(f"\n[bold]{info['name']}[/bold] — Adding Perplexity MCP\n")
+
+    if client == "codex":
+        console.print("[yellow]Note:[/yellow] Codex uses skill files for configuration.")
+        console.print("Use [bold]pwm skill install codex[/bold] to install the skill.")
+        return
+
+    if client == "claude-code":
+        success = _setup_claude_code()
+    else:
+        success = _setup_json_client(client)
+
+    if success:
+        console.print(f"\n[dim]Restart {info['name']} to activate the MCP server.[/dim]")
+
+
+@setup.command("remove")
+@click.argument("client")
+def setup_remove(client):
+    """Remove Perplexity MCP server from an AI tool.
+
+    \b
+    Examples:
+      pwm setup remove cursor
+      pwm setup remove claude-desktop
+      pwm setup remove all
+    """
+    if client == "all":
+        _remove_all()
+        return
+
+    if client not in CLIENT_REGISTRY:
+        valid = ", ".join(list(CLIENT_REGISTRY.keys()) + ["all"])
+        console.print(f"[red]Error:[/red] Unknown client '{client}'")
+        console.print(f"Available clients: {valid}")
+        raise SystemExit(1)
+
+    if client == "codex":
+        console.print("[yellow]Note:[/yellow] Codex uses skill files for configuration.")
+        console.print("Use [bold]pwm skill uninstall codex[/bold] to remove the skill.")
+        return
+
+    if client == "claude-code":
+        _remove_claude_code()
+    else:
+        _remove_json_client(client)
+
+
+@setup.command("list")
+def setup_list():
+    """Show supported AI tools and their MCP configuration status."""
+    table = Table(title="Perplexity MCP Server Configuration")
+    table.add_column("Client", style="cyan")
+    table.add_column("Description")
+    table.add_column("MCP Status", justify="center")
+    table.add_column("Config Path", style="dim")
+
+    for client_id, info in CLIENT_REGISTRY.items():
+        status = "[dim]-[/dim]"
+        config_path_str = ""
+
+        if client_id == "claude-code":
+            claude_cmd = shutil.which("claude")
+            if claude_cmd:
+                try:
+                    result = subprocess.run(
+                        [claude_cmd, "mcp", "list"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if MCP_SERVER_KEY in result.stdout.lower():
+                        status = "[green]✓[/green]"
+                except (subprocess.TimeoutExpired, OSError):
+                    status = "[dim]?[/dim]"
+                config_path_str = "claude mcp list"
+            else:
+                config_path_str = "not installed"
+        elif client_id == "codex":
+            config_path_str = "pwm skill install codex"
+            status = "[dim]skill[/dim]"
+        else:
+            config_fn = info["config_fn"]
+            key = info.get("key", MCP_SERVER_KEY)
+            path = config_fn()
+            config = _read_json_config(path)
+            if _is_configured(config, key):
+                status = "[green]✓[/green]"
+            config_path_str = str(path).replace(str(Path.home()), "~")
+
+        table.add_row(info["name"], info["description"], status, config_path_str)
+
+    console.print(table)
+    console.print("\n[dim]Add:    pwm setup add <client>[/dim]")
+    console.print("[dim]Remove: pwm setup remove <client>[/dim]")
+
+
+# ── Backward-compatible helpers for doctor.py ──────────────────────────────
+# doctor.py imports _get_tools() and _is_configured() (the AITool version).
+# We bridge to the new CLIENT_REGISTRY-based architecture here.
+
+
+def _get_tools() -> list[dict]:
+    """Return tool info for doctor.py compatibility.
+
+    Returns a list of simple objects with .name, .config_hint attributes
+    that doctor.py reads.
+    """
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class _ToolInfo:
+        name: str
+        config_hint: str
+
+    tools = []
+    for client_id, info in CLIENT_REGISTRY.items():
+        if client_id == "codex":
+            hint = "pwm skill install codex"
+        elif client_id == "claude-code":
+            hint = "claude mcp list"
+        else:
+            config_fn = info.get("config_fn")
+            hint = str(config_fn()).replace(str(Path.home()), "~") if config_fn else ""
+        tools.append(_ToolInfo(name=client_id, config_hint=hint))
+    return tools
+
+
+def _is_configured_compat(tool) -> bool:
+    """Check if MCP is configured for a tool (doctor.py compatibility).
+
+    Accepts a _ToolInfo or any object with a .name attribute.
+    """
+    return _is_already_configured(tool.name)

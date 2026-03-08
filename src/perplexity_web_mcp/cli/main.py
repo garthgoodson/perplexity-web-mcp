@@ -19,7 +19,10 @@ Subcommands:
 from __future__ import annotations
 
 import sys
+from importlib import metadata
 from typing import NoReturn
+
+import rich_click as click
 
 from perplexity_web_mcp.exceptions import AuthenticationError, RateLimitError
 from perplexity_web_mcp.shared import (
@@ -35,171 +38,79 @@ from perplexity_web_mcp.shared import (
 from perplexity_web_mcp.token_store import load_token
 
 
-def _print_help() -> None:
-    """Print usage help."""
-    print(
-        "pwm - Perplexity Web MCP CLI\n"
-        "\n"
-        "Usage:\n"
-        "  pwm ask <query> [options]       Ask a question using Perplexity AI\n"
-        "  pwm research <query> [options]  Deep research on a topic\n"
-        "  pwm login [options]             Authenticate with Perplexity\n"
-        "  pwm usage [--refresh]           Check remaining rate limits and quotas\n"
-        "  pwm api [options]               Start API server (Anthropic/OpenAI compatible)\n"
-        "  pwm setup [add|remove|list]     Configure MCP server for AI tools\n"
-        "  pwm hack claude [options]       Launch Claude Code using Perplexity models\n"
-        "  pwm skill [install|list|...]    Manage skill across AI platforms\n"
-        "  pwm doctor [-v]                 Diagnose installation, auth, and config\n"
-        "  pwm --ai                        Print AI-optimized documentation\n"
-        "  pwm --version                   Show version\n"
-        "  pwm --help                      Show this help\n"
-        "\n"
-        "Ask options:\n"
-        f"  -m, --model MODEL     Model to use ({', '.join(MODEL_NAMES)}) [default: auto]\n"
-        "  -t, --thinking        Enable extended thinking mode\n"
-        f"  -s, --source SOURCE   Source focus ({', '.join(SOURCE_FOCUS_NAMES)}) [default: web]\n"
-        "  --json                Output as JSON (answer + citations)\n"
-        "  --no-citations        Suppress citation URLs\n"
-        "  --intent INTENT       Routing intent: quick, standard, detailed, research [default: standard]\n"
-        "\n"
-        "API options:\n"
-        "  --host HOST           Bind address [default: 0.0.0.0]\n"
-        "  -p, --port PORT       Port number [default: 8080]\n"
-        "  --model MODEL         Default model [default: auto]\n"
-        "  --log-level LEVEL     Log level [default: info]\n"
-        "\n"
-        "Research options:\n"
-        f"  -s, --source SOURCE   Source focus ({', '.join(SOURCE_FOCUS_NAMES)}) [default: web]\n"
-        "  --json                Output as JSON\n"
-        "\n"
-        "Login options:\n"
-        "  --check               Check current auth status (no login prompt)\n"
-        "  --email EMAIL         Send verification code to email (non-interactive)\n"
-        "  --code CODE           Complete auth with 6-digit code from email\n"
-        "  --no-save             Don't save token to config\n"
-        "\n"
-        "Examples:\n"
-        '  pwm ask "What is quantum computing?"\n'
-        '  pwm ask "latest AI news" -m gpt52 -s academic\n'
-        '  pwm ask "explain transformers" -m claude_sonnet --thinking\n'
-        '  pwm research "agentic AI trends 2026"\n'
-        "  pwm login\n"
-        "  pwm login --check\n"
-        "  pwm usage\n"
-        "  pwm setup list\n"
-        "  pwm setup add cursor\n"
-        "  pwm skill install claude-code\n"
-        "  pwm doctor\n"
-    )
+# ── Click configuration ────────────────────────────────────────────────────
 
 
-def _print_version() -> None:
-    """Print version."""
-    from importlib import metadata
+def _print_ai_docs(ctx, param, value):
+    """Callback for --ai flag. Outputs AI-friendly documentation."""
+    if not value or ctx.resilient_parsing:
+        return
+    from perplexity_web_mcp.cli.ai_doc import print_ai_doc
+    print_ai_doc()
+    ctx.exit(0)
 
+
+def _print_version(ctx, param, value):
+    """Callback for --version flag."""
+    if not value or ctx.resilient_parsing:
+        return
     version = metadata.version("perplexity-web-mcp-cli")
-    print(f"perplexity-web-mcp-cli {version}")
+    click.echo(f"perplexity-web-mcp-cli {version}")
+    ctx.exit(0)
 
 
-def _cmd_api(args: list[str]) -> int:
-    """Handle: pwm api [options]"""
-    host = "0.0.0.0"
-    port = 8080
-    log_level = "INFO"
-    default_model = "auto"
+@click.group(invoke_without_command=True)
+@click.option("--version", "-v", is_flag=True, callback=_print_version,
+              expose_value=False, is_eager=True, help="Show version.")
+@click.option("--ai", is_flag=True, callback=_print_ai_docs,
+              expose_value=False, is_eager=True,
+              help="Print AI-optimized documentation (for LLM agents).")
+@click.pass_context
+def cli(ctx):
+    """pwm — Perplexity Web MCP CLI.
 
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg in ("--host",) and i + 1 < len(args):
-            host = args[i + 1]
-            i += 2
-        elif arg in ("-p", "--port") and i + 1 < len(args):
-            port = int(args[i + 1])
-            i += 2
-        elif arg in ("--log-level",) and i + 1 < len(args):
-            log_level = args[i + 1]
-            i += 2
-        elif arg in ("--model",) and i + 1 < len(args):
-            default_model = args[i + 1]
-            i += 2
-        elif arg in ("--help", "-h"):
-            print(
-                "pwm api - Start the Anthropic/OpenAI API-compatible server\n"
-                "\n"
-                "Usage: pwm api [options]\n"
-                "\n"
-                "Options:\n"
-                "  --host HOST           Bind address [default: 0.0.0.0]\n"
-                "  -p, --port PORT       Port number [default: 8080]\n"
-                "  --model MODEL         Default model [default: auto]\n"
-                "  --log-level LEVEL     Log level: debug, info, warning, error [default: info]\n"
-            )
-            return 0
-        else:
-            print(f"Unknown option: {arg}", file=sys.stderr)
-            return 1
-
-    import os
-
-    os.environ.setdefault("HOST", host)
-    os.environ.setdefault("PORT", str(port))
-    os.environ.setdefault("LOG_LEVEL", log_level)
-    os.environ.setdefault("DEFAULT_MODEL", default_model)
-
-    from perplexity_web_mcp.api import run_server
-
-    run_server()
-    return 0
+    Ask questions, run deep research, manage MCP server setup,
+    and more — all powered by Perplexity AI.
+    """
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
-def _cmd_ask(args: list[str]) -> int:
-    """Handle: pwm ask <query> [options]"""
-    if not args or args[0].startswith("-"):
-        print("Error: pwm ask requires a query string.\n", file=sys.stderr)
-        print('Usage: pwm ask "your question" [--model MODEL] [--thinking] [--source SOURCE]', file=sys.stderr)
-        return 1
+# ── Ask ────────────────────────────────────────────────────────────────────
 
-    query = args[0]
-    model_name = "auto"
-    thinking = False
-    source: SourceFocusName = "web"
-    json_output = False
-    no_citations = False
-    explicit_model = False
-    intent = "standard"
 
-    i = 1
-    while i < len(args):
-        arg = args[i]
-        if arg in ("-m", "--model") and i + 1 < len(args):
-            model_name = args[i + 1]
-            explicit_model = True
-            i += 2
-        elif arg in ("-t", "--thinking"):
-            thinking = True
-            i += 1
-        elif arg in ("-s", "--source") and i + 1 < len(args):
-            source = args[i + 1]  # type: ignore[assignment]
-            i += 2
-        elif arg == "--json":
-            json_output = True
-            i += 1
-        elif arg == "--no-citations":
-            no_citations = True
-            i += 1
-        elif arg == "--intent" and i + 1 < len(args):
-            intent = args[i + 1]
-            i += 2
-        else:
-            print(f"Unknown option: {arg}", file=sys.stderr)
-            return 1
+@cli.command()
+@click.argument("query")
+@click.option("-m", "--model", "model_name", default="auto",
+              help=f"Model to use ({', '.join(MODEL_NAMES)}).")
+@click.option("-t", "--thinking", is_flag=True, help="Enable extended thinking mode.")
+@click.option("-s", "--source", "source", default="web",
+              help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}).")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
+@click.option("--no-citations", is_flag=True, help="Suppress citation URLs.")
+@click.option("--intent", default="standard",
+              help="Routing intent: quick, standard, detailed, research.")
+def ask_cmd(query, model_name, thinking, source, json_output, no_citations, intent):
+    """Ask a question using Perplexity AI.
 
+    \b
+    Examples:
+      pwm ask "What is quantum computing?"
+      pwm ask "latest AI news" -m gpt52 -s academic
+      pwm ask "explain transformers" -m claude_sonnet --thinking
+    """
+    code = _cmd_ask_impl(query, model_name, thinking, source, json_output, no_citations, intent)
+    raise SystemExit(code)
+
+
+def _cmd_ask_impl(query, model_name, thinking, source, json_output, no_citations, intent):
+    """Implementation for ask command (kept separate for testability)."""
     if source not in SOURCE_FOCUS_NAMES:
         print(f"Error: Unknown source '{source}'. Available: {', '.join(SOURCE_FOCUS_NAMES)}", file=sys.stderr)
         return 1
 
     try:
+        explicit_model = model_name != "auto"
         if explicit_model:
             if model_name not in MODEL_MAP:
                 print(f"Error: Unknown model '{model_name}'. Available: {', '.join(MODEL_NAMES)}", file=sys.stderr)
@@ -248,30 +159,30 @@ def _cmd_ask(args: list[str]) -> int:
     return 0
 
 
-def _cmd_research(args: list[str]) -> int:
-    """Handle: pwm research <query> [options]"""
-    if not args or args[0].startswith("-"):
-        print("Error: pwm research requires a query string.\n", file=sys.stderr)
-        print('Usage: pwm research "your topic" [--source SOURCE]', file=sys.stderr)
-        return 1
+# ── Research ───────────────────────────────────────────────────────────────
 
-    query = args[0]
-    source: SourceFocusName = "web"
-    json_output = False
 
-    i = 1
-    while i < len(args):
-        arg = args[i]
-        if arg in ("-s", "--source") and i + 1 < len(args):
-            source = args[i + 1]  # type: ignore[assignment]
-            i += 2
-        elif arg == "--json":
-            json_output = True
-            i += 1
-        else:
-            print(f"Unknown option: {arg}", file=sys.stderr)
-            return 1
+@cli.command()
+@click.argument("query")
+@click.option("-s", "--source", "source", default="web",
+              help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}).")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
+def research(query, source, json_output):
+    """Deep research on a topic.
 
+    Uses the in-depth research model for comprehensive reports (monthly quota).
+
+    \b
+    Examples:
+      pwm research "agentic AI trends 2026"
+      pwm research "quantum computing advances" -s academic
+    """
+    code = _cmd_research_impl(query, source, json_output)
+    raise SystemExit(code)
+
+
+def _cmd_research_impl(query, source, json_output):
+    """Implementation for research command."""
     model = Models.DEEP_RESEARCH
 
     try:
@@ -301,22 +212,64 @@ def _cmd_research(args: list[str]) -> int:
     return 0
 
 
-def _cmd_login(args: list[str]) -> int:
-    """Handle: pwm login [options] -- delegates to the existing auth module."""
+# ── Login ──────────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("--check", is_flag=True, help="Check current auth status (no login prompt).")
+@click.option("--email", default=None, help="Send verification code to email (non-interactive).")
+@click.option("--code", default=None, help="Complete auth with 6-digit code from email.")
+@click.option("--no-save", is_flag=True, help="Don't save token to config.")
+@click.pass_context
+def login(ctx, check, email, code, no_save):
+    """Authenticate with Perplexity.
+
+    \b
+    Examples:
+      pwm login                                    # Interactive login
+      pwm login --check                            # Check current auth status
+      pwm login --email user@example.com           # Send verification code
+      pwm login --email user@example.com --code 123456  # Complete auth
+    """
     from perplexity_web_mcp.cli.auth import main as auth_main
 
-    sys.argv = ["pwm-auth", *args]
+    # Build args for the auth module
+    auth_args = []
+    if check:
+        auth_args.append("--check")
+    if email:
+        auth_args.extend(["--email", email])
+    if code:
+        auth_args.extend(["--code", code])
+    if no_save:
+        auth_args.append("--no-save")
+
+    sys.argv = ["pwm-auth", *auth_args]
     try:
         auth_main()
     except SystemExit as e:
-        return e.code if isinstance(e.code, int) else 0
-    return 0
+        raise SystemExit(e.code if isinstance(e.code, int) else 0)
 
 
-def _cmd_usage(args: list[str]) -> int:
-    """Handle: pwm usage [--refresh]"""
-    refresh = "--refresh" in args
+# ── Usage ──────────────────────────────────────────────────────────────────
 
+
+@cli.command()
+@click.option("--refresh", is_flag=True, help="Force refresh rate limit data.")
+def usage(refresh):
+    """Check remaining rate limits and quotas.
+
+    \b
+    Examples:
+      pwm usage
+      pwm usage --refresh
+    """
+    code = _cmd_usage_impl(refresh)
+    raise SystemExit(code)
+
+
+def _cmd_usage_impl(refresh):
+    """Implementation for usage command."""
     token = load_token()
     if not token:
         print(
@@ -351,68 +304,213 @@ def _cmd_usage(args: list[str]) -> int:
     return 0
 
 
+# ── API ────────────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Bind address.")
+@click.option("-p", "--port", default=8080, type=int, help="Port number.")
+@click.option("--model", "default_model", default="auto", help="Default model.")
+@click.option("--log-level", default="info", help="Log level: debug, info, warning, error.")
+def api(host, port, default_model, log_level):
+    """Start the Anthropic/OpenAI API-compatible server.
+
+    \b
+    Examples:
+      pwm api
+      pwm api --port 9090
+      pwm api --model gpt52 --log-level debug
+    """
+    import os
+
+    os.environ.setdefault("HOST", host)
+    os.environ.setdefault("PORT", str(port))
+    os.environ.setdefault("LOG_LEVEL", log_level)
+    os.environ.setdefault("DEFAULT_MODEL", default_model)
+
+    from perplexity_web_mcp.api import run_server
+
+    run_server()
+
+
+# ── Hack ───────────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("tool")
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def hack(ctx, tool, extra_args):
+    """Launch AI tools connected to Perplexity models.
+
+    Currently supports 'claude' — launches Claude Code using
+    the local Perplexity API server as the backend.
+
+    \b
+    Examples:
+      pwm hack claude
+      pwm hack claude -m gpt52
+    """
+    from perplexity_web_mcp.cli.hack import cmd_hack
+
+    code = cmd_hack([tool, *extra_args])
+    raise SystemExit(code)
+
+
+# ── Skill ──────────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("args", nargs=-1)
+def skill(args):
+    """Manage Perplexity Web MCP skill across AI platforms.
+
+    \b
+    Actions:
+      pwm skill list                          Show tools and installation status
+      pwm skill install <tool>                Install skill for a tool
+      pwm skill install all                   Install for all detected tools
+      pwm skill install <tool> --level project  Install at project level
+      pwm skill uninstall <tool>              Remove installed skill
+      pwm skill show                          Display the skill content
+      pwm skill update                        Update all outdated skills
+
+    \b
+    Tools: claude-code, cursor, codex, opencode, gemini-cli,
+           antigravity, cline, openclaw, all
+    """
+    from perplexity_web_mcp.cli.skill import cmd_skill
+
+    code = cmd_skill(list(args))
+    raise SystemExit(code)
+
+
+# ── Doctor ─────────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("-v", "--verbose", is_flag=True, help="Show additional diagnostic details.")
+def doctor(verbose):
+    """Diagnose installation, auth, config, and limits.
+
+    Runs a comprehensive set of checks and reports the status
+    of your Perplexity Web MCP installation.
+
+    \b
+    Examples:
+      pwm doctor
+      pwm doctor -v
+    """
+    from perplexity_web_mcp.cli.doctor import cmd_doctor
+
+    args = []
+    if verbose:
+        args.append("-v")
+    code = cmd_doctor(args)
+    raise SystemExit(code)
+
+
+# ── Setup (Click subgroup) ─────────────────────────────────────────────────
+
+
+def _register_setup():
+    """Register the setup subgroup from the setup module."""
+    from perplexity_web_mcp.cli.setup import setup
+    cli.add_command(setup)
+
+
+_register_setup()
+
+
+# ── Legacy functions for backward compatibility (tests) ────────────────────
+
+
+def _cmd_ask(args: list[str]) -> int:
+    """Handle: pwm ask <query> [options] — legacy interface for tests."""
+    if not args or args[0].startswith("-"):
+        print("Error: pwm ask requires a query string.\n", file=sys.stderr)
+        print('Usage: pwm ask "your question" [--model MODEL] [--thinking] [--source SOURCE]', file=sys.stderr)
+        return 1
+
+    query = args[0]
+    model_name = "auto"
+    thinking = False
+    source: SourceFocusName = "web"
+    json_output = False
+    no_citations = False
+    intent = "standard"
+
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-m", "--model") and i + 1 < len(args):
+            model_name = args[i + 1]
+            i += 2
+        elif arg in ("-t", "--thinking"):
+            thinking = True
+            i += 1
+        elif arg in ("-s", "--source") and i + 1 < len(args):
+            source = args[i + 1]  # type: ignore[assignment]
+            i += 2
+        elif arg == "--json":
+            json_output = True
+            i += 1
+        elif arg == "--no-citations":
+            no_citations = True
+            i += 1
+        elif arg == "--intent" and i + 1 < len(args):
+            intent = args[i + 1]
+            i += 2
+        else:
+            print(f"Unknown option: {arg}", file=sys.stderr)
+            return 1
+
+    return _cmd_ask_impl(query, model_name, thinking, source, json_output, no_citations, intent)
+
+
+def _cmd_research(args: list[str]) -> int:
+    """Handle: pwm research <query> [options] — legacy interface for tests."""
+    if not args or args[0].startswith("-"):
+        print("Error: pwm research requires a query string.\n", file=sys.stderr)
+        print('Usage: pwm research "your topic" [--source SOURCE]', file=sys.stderr)
+        return 1
+
+    query = args[0]
+    source: SourceFocusName = "web"
+    json_output = False
+
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-s", "--source") and i + 1 < len(args):
+            source = args[i + 1]  # type: ignore[assignment]
+            i += 2
+        elif arg == "--json":
+            json_output = True
+            i += 1
+        else:
+            print(f"Unknown option: {arg}", file=sys.stderr)
+            return 1
+
+    return _cmd_research_impl(query, source, json_output)
+
+
+def _cmd_usage(args: list[str]) -> int:
+    """Handle: pwm usage [--refresh] — legacy interface for tests."""
+    refresh = "--refresh" in args
+    return _cmd_usage_impl(refresh)
+
+
+# ── Entry point ────────────────────────────────────────────────────────────
+
+
 def main() -> NoReturn:
     """Main entry point for the unified pwm CLI."""
-    args = sys.argv[1:]
-
-    if not args:
-        _print_help()
-        sys.exit(0)
-
-    first = args[0]
-
-    if first in ("--help", "-h", "help"):
-        _print_help()
-        sys.exit(0)
-
-    if first in ("--version", "-v"):
-        _print_version()
-        sys.exit(0)
-
-    if first == "--ai":
-        from perplexity_web_mcp.cli.ai_doc import print_ai_doc
-
-        print_ai_doc()
-        sys.exit(0)
-
-    if first == "api":
-        sys.exit(_cmd_api(args[1:]))
-
-    if first == "ask":
-        sys.exit(_cmd_ask(args[1:]))
-
-    if first == "research":
-        sys.exit(_cmd_research(args[1:]))
-
-    if first in ("login", "auth"):
-        sys.exit(_cmd_login(args[1:]))
-
-    if first == "usage":
-        sys.exit(_cmd_usage(args[1:]))
-
-    if first == "setup":
-        from perplexity_web_mcp.cli.setup import cmd_setup
-
-        sys.exit(cmd_setup(args[1:]))
-
-    if first == "hack":
-        from perplexity_web_mcp.cli.hack import cmd_hack
-
-        sys.exit(cmd_hack(args[1:]))
-
-    if first == "skill":
-        from perplexity_web_mcp.cli.skill import cmd_skill
-
-        sys.exit(cmd_skill(args[1:]))
-
-    if first == "doctor":
-        from perplexity_web_mcp.cli.doctor import cmd_doctor
-
-        sys.exit(cmd_doctor(args[1:]))
-
-    print(f"Unknown command: {first}\n", file=sys.stderr)
-    _print_help()
-    sys.exit(1)
+    try:
+        cli(standalone_mode=True)
+    except SystemExit as e:
+        sys.exit(e.code if isinstance(e.code, int) else 0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

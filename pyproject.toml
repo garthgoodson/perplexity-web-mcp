@@ -1,6 +1,6 @@
 [project]
 name = "perplexity-web-mcp-cli"
-version = "0.8.2"
+version = "0.8.3"
 description = "CLI, MCP server, and Anthropic/OpenAI API-compatible interface for Perplexity AI."
 authors = [{ name = "Jacob BD" }]
 license = "MIT"
@@ -29,6 +29,7 @@ dependencies = [
     "tenacity>=9.1.2,<10.0",
     "python-dotenv>=1.0.0,<2.0",
     "rich>=13.0.0,<15.0",
+    "rich-click>=1.8",
     "fastmcp>=2.14.4,<3.0",
     "fastapi>=0.115.0,<1.0",
     "uvicorn>=0.30.0,<1.0",

@@ -11,9 +11,9 @@ Use your Perplexity Pro/Max subscription to access premium models (GPT-5.2, Clau
 ## Features
 
 - **CLI**: Query Perplexity models directly from the terminal (`pwm ask`, `pwm research`)
-- **MCP Server**: 17 MCP tools for AI agents with citations and rate limit checking
+- **MCP Server**: 21 MCP tools for AI agents with citations and rate limit checking
 - **API Server**: Drop-in Anthropic Messages API and OpenAI Chat Completions API
-- **10 Models**: GPT-5.2, Claude 4.6 Opus, Claude 4.6 Sonnet, Gemini 3 Flash, Gemini 3.1 Pro, Grok 4.1, Kimi K2.5, Sonar
+- **11 Models**: GPT-5.4, GPT-5.2, Claude 4.6 Opus, Claude 4.6 Sonnet, Gemini 3 Flash, Gemini 3.1 Pro, Grok 4.1, Kimi K2.5, Sonar
 - **Thinking Mode**: Extended thinking support for all compatible models
 - **Deep Research**: Full support for Perplexity's Deep Research mode
 - **Setup & Skill Management**: Auto-configure MCP for Claude, Cursor, Windsurf, Gemini CLI; install Agent Skills across platforms
@@ -88,8 +88,8 @@ pwm research "agentic AI trends 2026"
 pwm usage
 
 # 5. Set up MCP for your AI tools
-pwm setup add claude-code
-pwm setup add cursor
+pwm setup add all           # Interactive setup for all detected tools
+pwm setup add cursor        # Or add individually
 
 # 6. Install the Agent Skill
 pwm skill install claude-code
@@ -203,10 +203,12 @@ pwm hack claude -m gpt52   # Launch Claude Code with a specific model
 
 ```bash
 pwm setup list             # Show supported tools and MCP configuration status
+pwm setup add all          # Interactive: detect and configure all tools
 pwm setup add claude-code  # Add MCP server to Claude Code
 pwm setup add cursor       # Add MCP server to Cursor
 pwm setup add windsurf     # Add MCP server to Windsurf
 pwm setup add gemini       # Add MCP server to Gemini CLI
+pwm setup remove all       # Remove from all configured tools
 pwm setup remove cursor    # Remove MCP server from a tool
 ```
 
@@ -243,6 +245,7 @@ pwm --ai                   # Print comprehensive AI-optimized reference
 | `auto` | Perplexity | No | Auto-selects best model |
 | `sonar` | Perplexity | No | Perplexity's latest model |
 | `deep_research` | Perplexity | No | Monthly quota, in-depth reports |
+| `gpt54` | OpenAI | Toggle | GPT-5.4 |
 | `gpt52` | OpenAI | Toggle | GPT-5.2 |
 | `claude_sonnet` | Anthropic | Toggle | Claude 4.6 Sonnet |
 | `claude_opus` | Anthropic | Toggle | Claude 4.6 Opus (Max tier required) |
@@ -282,7 +285,7 @@ Or configure manually for any MCP client:
 claude mcp add perplexity pwm-mcp
 ```
 
-**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+**Claude Desktop** — Download the `.mcpb` extension from the [latest release](https://github.com/jacob-bd/perplexity-web-mcp/releases/latest) and open it with Claude Desktop. Or configure manually:
 ```json
 {
   "mcpServers": {
@@ -306,7 +309,7 @@ claude mcp add perplexity pwm-mcp
 
 ### Available MCP Tools
 
-**Query tools (14):**
+**Query tools (16):**
 
 | Tool | Description |
 |------|-------------|
@@ -314,12 +317,19 @@ claude mcp add perplexity pwm-mcp
 | `pplx_ask` | Quick Q&A (auto-selects best model) |
 | `pplx_deep_research` | In-depth reports with sources |
 | `pplx_sonar` | Perplexity Sonar |
+| `pplx_gpt54` / `pplx_gpt54_thinking` | GPT-5.4 |
 | `pplx_gpt52` / `pplx_gpt52_thinking` | GPT-5.2 |
 | `pplx_claude_sonnet` / `pplx_claude_sonnet_think` | Claude 4.6 Sonnet |
 | `pplx_gemini_flash` / `pplx_gemini_flash_think` | Gemini 3 Flash |
 | `pplx_gemini_pro_think` | Gemini 3.1 Pro (thinking always on) |
 | `pplx_grok` / `pplx_grok_thinking` | Grok 4.1 |
 | `pplx_kimi_thinking` | Kimi K2.5 (thinking always on) |
+
+**Smart routing (1):**
+
+| Tool | Description |
+|------|-------------|
+| `pplx_smart_query` | Quota-aware routing — auto-selects best model based on limits |
 
 **Usage & auth tools (4):**
 
@@ -370,6 +380,7 @@ export OPENAI_API_KEY=anything
 | API Name | Perplexity Model | Thinking |
 |----------|------------------|----------|
 | `perplexity-auto` | Best (auto-select) | No |
+| `gpt-5.4` | GPT-5.4 | Toggle |
 | `gpt-5.2` | GPT-5.2 | Toggle |
 | `claude-sonnet-4-6` | Claude 4.6 Sonnet | Toggle |
 | `claude-opus-4-6` | Claude 4.6 Opus | Toggle |

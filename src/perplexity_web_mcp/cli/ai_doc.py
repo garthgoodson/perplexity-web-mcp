@@ -14,7 +14,7 @@ PERPLEXITY WEB MCP - AI REFERENCE
 
 Perplexity Web MCP provides three interfaces to Perplexity AI:
   1. CLI (pwm)         - Direct terminal queries and authentication
-  2. MCP Server        - 17 MCP tools for AI agents (pplx_* namespace)
+  2. MCP Server        - 21 MCP tools for AI agents (pplx_* namespace)
   3. API Server        - Anthropic/OpenAI-compatible HTTP endpoints
 
 All three share the same backend, models, and authentication token stored at
@@ -129,10 +129,15 @@ MCP examples:
   pplx_query(query="Tesla financials", model="gpt52", source_focus="finance")
 
 ================================================================================
-MCP TOOLS (17 total, pplx_* namespace)
+MCP TOOLS (21 total, pplx_* namespace)
 ================================================================================
 
-QUERY TOOLS (14):
+SMART ROUTING (1):
+  pplx_smart_query(query, intent="standard", source_focus="web")
+      RECOMMENDED default tool. Checks remaining quotas, selects best
+      model/search type. Intents: quick, standard, detailed, research.
+
+QUERY TOOLS (16):
   pplx_query(query, model="auto", thinking=False, source_focus="web")
       Flexible: pick any model + thinking toggle.
 

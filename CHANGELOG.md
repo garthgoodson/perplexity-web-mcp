@@ -4,6 +4,27 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.8.3] - 2026-03-08
+
+### Added
+
+- **Rich-Click CLI** — Entire CLI converted from manual `sys.argv` parsing to Click + `rich-click`. All commands now show colored, boxed help output with examples.
+- **`pwm setup add all`** — Interactive multi-tool MCP setup. Scans system for detected AI tools, shows a Rich table with installation status, and lets you select which tools to configure.
+- **`pwm setup remove all`** — Batch removal of MCP configurations with confirmation prompt.
+- **Claude Desktop MCP extension** (`.mcpb`) — Bundled extension package for one-click Claude Desktop setup. Includes `run_server.py` launcher with cross-platform `uvx` discovery (macOS, Linux, Windows). Built automatically on every GitHub release.
+
+### Fixed
+
+- **Codex skill paths** — Updated from `.codex/skills/` to `.agents/skills/` per official OpenAI Codex documentation. Detection now checks for the `codex` binary in PATH instead of the shared `~/.agents/` directory.
+
+### Changed
+
+- **`claude-desktop` removed from `pwm setup`** — Claude Desktop is now configured via the `.mcpb` extension file (downloaded from GitHub releases) instead of the setup CLI.
+- MCP tool count updated to 21 across all documentation surfaces.
+
+---
+
+
 ## [0.8.2] - 2026-03-05
 
 ### Fixed

@@ -1,0 +1,81 @@
+{
+    "manifest_version": "0.2",
+    "name": "perplexity-web-mcp",
+    "display_name": "Perplexity Web MCP Server",
+    "version": "0.8.3",
+    "description": "Connect Claude to Perplexity AI. Search the web with premium models — GPT-5, Claude Sonnet, Gemini, Grok — with real-time data, citations, and quota-aware routing.",
+    "long_description": "This extension connects Claude Desktop to Perplexity AI via the Model Context Protocol. It provides 21 tools for web search, deep research, model selection, and in-band authentication.\n\n**Prerequisites:**\n1. Install the package: `pip install perplexity-web-mcp-cli` or `uv tool install perplexity-web-mcp-cli`\n2. Authenticate: Run `pwm login` to set up your Perplexity account\n\n**Features:**\n- Smart query with automatic model/quota routing\n- Access to all Perplexity models (GPT-5.4, Claude Sonnet 4.6, Gemini 3, Grok 4.1, etc.)\n- Deep Research for comprehensive reports\n- Extended thinking mode for complex analysis\n- Source focus: web, academic, social, finance\n- In-band authentication (no manual token management)",
+    "author": {
+        "name": "Jacob Ben-David",
+        "email": "mail4j@duck.com",
+        "url": "https://github.com/jacob-bd"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/jacob-bd/perplexity-web-mcp"
+    },
+    "homepage": "https://github.com/jacob-bd/perplexity-web-mcp",
+    "documentation": "https://github.com/jacob-bd/perplexity-web-mcp#readme",
+    "support": "https://github.com/jacob-bd/perplexity-web-mcp/",
+    "server": {
+        "type": "python",
+        "entry_point": "run_server.py",
+        "mcp_config": {
+            "command": "python3",
+            "args": [
+                "${__dirname}/run_server.py"
+            ],
+            "env": {}
+        }
+    },
+    "tools": [
+        {
+            "name": "pplx_smart_query",
+            "description": "Quota-aware query — auto-selects best model based on limits"
+        },
+        {
+            "name": "pplx_query",
+            "description": "Query with explicit model selection and thinking toggle"
+        },
+        {
+            "name": "pplx_ask",
+            "description": "Ask a question with real-time web data"
+        },
+        {
+            "name": "pplx_deep_research",
+            "description": "In-depth reports with more sources and reasoning"
+        },
+        {
+            "name": "pplx_usage",
+            "description": "Check remaining rate limits and quotas"
+        },
+        {
+            "name": "pplx_auth_status",
+            "description": "Check current authentication status"
+        }
+    ],
+    "tools_generated": true,
+    "keywords": [
+        "perplexity",
+        "ai",
+        "search",
+        "web",
+        "research",
+        "mcp",
+        "gpt",
+        "claude",
+        "gemini"
+    ],
+    "license": "MIT",
+    "compatibility": {
+        "claude_desktop": ">=0.10.0",
+        "platforms": [
+            "darwin",
+            "win32",
+            "linux"
+        ],
+        "runtimes": {
+            "python": ">=3.10"
+        }
+    }
+}

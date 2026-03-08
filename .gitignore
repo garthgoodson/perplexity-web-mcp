@@ -25,5 +25,6 @@ publish.sh
 *.log
 *.tmp
 *.bak
+*.mcpb
 .DS_Store
 thumbs.db

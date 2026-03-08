@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from perplexity_web_mcp.cli.doctor import cmd_doctor
-from perplexity_web_mcp.cli.setup import AITool
+from unittest.mock import MagicMock as _MagicMock  # AITool removed, using mock
 from perplexity_web_mcp.cli.skill import SKILL_DIR_NAME, SkillTarget
 from perplexity_web_mcp.rate_limits import RateLimits
 
@@ -160,7 +160,7 @@ class TestDoctorMCPNotConfigured:
     @patch("perplexity_web_mcp.cli.auth.get_user_info")
     @patch("perplexity_web_mcp.rate_limits.fetch_rate_limits")
     @patch("perplexity_web_mcp.cli.setup._get_tools")
-    @patch("perplexity_web_mcp.cli.setup._is_configured", return_value=False)
+    @patch("perplexity_web_mcp.cli.setup._is_configured_compat", return_value=False)
     @patch("perplexity_web_mcp.cli.skill._get_targets", return_value=[])
     def test_shows_setup_suggestions(
         self, mock_targets, mock_is_conf, mock_tools, mock_limits, mock_user,
@@ -176,9 +176,9 @@ class TestDoctorMCPNotConfigured:
 
         mock_limits.return_value = RateLimits(remaining_pro=100)
 
-        mock_tools.return_value = [
-            AITool(name="cursor", description="Cursor", config_path=None, config_hint=""),
-        ]
+        tool_mock = _MagicMock()
+        tool_mock.name = "cursor"
+        mock_tools.return_value = [tool_mock]
 
         code = cmd_doctor([])
         out = capsys.readouterr().out

@@ -91,11 +91,11 @@ def cmd_doctor(args: list[str]) -> int:
 
     # --- MCP Configuration ---
     print("\nMCP Configuration")
-    from perplexity_web_mcp.cli.setup import _get_tools, _is_configured
+    from perplexity_web_mcp.cli.setup import _get_tools, _is_configured_compat
     tools = _get_tools()
     any_configured = False
     for tool in tools:
-        configured = _is_configured(tool)
+        configured = _is_configured_compat(tool)
         if configured:
             any_configured = True
         label = tool.name

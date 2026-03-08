@@ -29,7 +29,7 @@ class TestMainRouting:
                 main()
             assert exc.value.code == 0
         out = capsys.readouterr().out
-        assert "pwm - Perplexity Web MCP CLI" in out
+        assert "Perplexity Web MCP CLI" in out
 
     def test_help_flag(self, capsys: pytest.CaptureFixture) -> None:
         with patch.object(sys, "argv", ["pwm", "--help"]):
@@ -54,12 +54,13 @@ class TestMainRouting:
         assert "PERPLEXITY WEB MCP" in out
         assert "CLI COMMANDS" in out
 
-    def test_unknown_command_exits_1(self, capsys: pytest.CaptureFixture) -> None:
+    def test_unknown_command_exits_nonzero(self, capsys: pytest.CaptureFixture) -> None:
         with patch.object(sys, "argv", ["pwm", "bogus"]):
             with pytest.raises(SystemExit) as exc:
                 main()
-            assert exc.value.code == 1
-        assert "Unknown command" in capsys.readouterr().err
+            # Click exits with code 2 for usage errors
+            assert exc.value.code != 0
+        assert "No such command" in capsys.readouterr().err
 
 
 # ============================================================================
@@ -72,7 +73,7 @@ class TestCmdAsk:
 
     @patch("perplexity_web_mcp.cli.main.ask", return_value="The answer")
     def test_basic_ask(self, mock_ask: MagicMock, capsys: pytest.CaptureFixture) -> None:
-        code = _cmd_ask(["What is AI?", "-m", "auto"])
+        code = _cmd_ask(["What is AI?", "-m", "sonar"])
         assert code == 0
         assert "The answer" in capsys.readouterr().out
         mock_ask.assert_called_once()
@@ -104,7 +105,7 @@ class TestCmdAsk:
 
     @patch("perplexity_web_mcp.cli.main.ask", return_value="Answer\n\nCitations:\n[1]: https://x.com")
     def test_no_citations_flag(self, mock_ask: MagicMock, capsys: pytest.CaptureFixture) -> None:
-        code = _cmd_ask(["query", "-m", "auto", "--no-citations"])
+        code = _cmd_ask(["query", "-m", "sonar", "--no-citations"])
         assert code == 0
         out = capsys.readouterr().out
         assert "Answer" in out
@@ -114,7 +115,7 @@ class TestCmdAsk:
     def test_json_flag(self, mock_ask: MagicMock, capsys: pytest.CaptureFixture) -> None:
         import orjson
 
-        code = _cmd_ask(["query", "-m", "auto", "--json"])
+        code = _cmd_ask(["query", "-m", "sonar", "--json"])
         assert code == 0
         raw = capsys.readouterr().out
         data = orjson.loads(raw)
@@ -132,7 +133,7 @@ class TestCmdAsk:
 
     @patch("perplexity_web_mcp.cli.main.ask", return_value="response")
     def test_source_flag(self, mock_ask: MagicMock) -> None:
-        _cmd_ask(["query", "-m", "auto", "-s", "academic"])
+        _cmd_ask(["query", "-m", "sonar", "-s", "academic"])
         call_args = mock_ask.call_args
         assert call_args[0][2] == "academic"
 
@@ -203,14 +204,14 @@ class TestCmdAskErrorHandling:
 
     @patch("perplexity_web_mcp.cli.main.ask", side_effect=AuthenticationError())
     def test_auth_error_returns_1(self, mock_ask: MagicMock, capsys: pytest.CaptureFixture) -> None:
-        code = _cmd_ask(["query", "-m", "auto"])
+        code = _cmd_ask(["query", "-m", "sonar"])
         assert code == 1
         err = capsys.readouterr().err
         assert "403" in err or "forbidden" in err.lower()
 
     @patch("perplexity_web_mcp.cli.main.ask", side_effect=RateLimitError())
     def test_rate_limit_error_returns_1(self, mock_ask: MagicMock, capsys: pytest.CaptureFixture) -> None:
-        code = _cmd_ask(["query", "-m", "auto"])
+        code = _cmd_ask(["query", "-m", "sonar"])
         assert code == 1
         err = capsys.readouterr().err
         assert "429" in err or "rate limit" in err.lower()

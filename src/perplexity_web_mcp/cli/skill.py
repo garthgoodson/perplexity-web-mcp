@@ -49,8 +49,8 @@ def _get_targets() -> list[SkillTarget]:
         SkillTarget(
             name="codex",
             description="OpenAI Codex CLI",
-            user_dir=home / ".codex" / "skills",
-            project_dir=".codex/skills",
+            user_dir=home / ".agents" / "skills",
+            project_dir=".agents/skills",
         ),
         SkillTarget(
             name="opencode",
@@ -91,7 +91,14 @@ def _is_tool_detected(target: SkillTarget) -> bool:
     Looks for the tool's config directory (parent of its skills dir) and
     verifies the tool itself created content there -- not just our own
     ``skills/`` subdirectory from a previous install.
+
+    Special case: Codex uses ``~/.agents/`` which is a shared directory,
+    so we check for the ``codex`` binary in PATH instead.
     """
+    # Codex: check for binary since ~/.agents/ is a shared directory
+    if target.name == "codex":
+        return shutil.which("codex") is not None
+
     config_root = target.user_dir.parent
     if not config_root.is_dir():
         return False
