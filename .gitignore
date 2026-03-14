@@ -14,7 +14,7 @@ build/
 tools
 .planning/
 plan/
-docs/
+docs/plans/
 
 # ─ ─── Files ─── ─ #
 example*.py

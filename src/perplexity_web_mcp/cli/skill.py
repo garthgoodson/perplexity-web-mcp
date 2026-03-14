@@ -83,6 +83,12 @@ def _get_targets() -> list[SkillTarget]:
             project_dir=".openclaw/workspace/skills",
         ),
         SkillTarget(
+            name="cc-claw",
+            description="CC-Claw AI agent framework",
+            user_dir=home / ".cc-claw" / "workspace" / "skills",
+            project_dir=".cc-claw/skills",
+        ),
+        SkillTarget(
             name="other",
             description="Export all formats for manual install",
             user_dir=home,  # not used for export
@@ -265,6 +271,11 @@ cp -r {SKILL_DIR_NAME} ~/.cline/skills/
 cp -r {SKILL_DIR_NAME} ~/.openclaw/workspace/skills/
 ```
 
+### CC-Claw
+```bash
+cp -r {SKILL_DIR_NAME} ~/.cc-claw/workspace/skills/
+```
+
 ## Automated Installation
 
 Instead of manual copying, you can use:
@@ -272,7 +283,7 @@ Instead of manual copying, you can use:
 pwm skill install <tool>
 ```
 
-Where `<tool>` is: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw.
+Where `<tool>` is: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw, cc-claw.
 """
 
     (export_dir / "README.md").write_text(readme_content)
@@ -363,7 +374,7 @@ def cmd_skill(args: list[str]) -> int:
             "  pwm skill show                          Display the skill content\n"
             "  pwm skill update                        Update all outdated skills\n"
             "\n"
-            "Tools: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw, other, all\n"
+            "Tools: claude-code, cursor, codex, opencode, gemini-cli, antigravity, cline, openclaw, cc-claw, other, all\n"
             "\n"
             "Examples:\n"
             "  pwm skill list\n"

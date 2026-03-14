@@ -2,7 +2,7 @@
     "manifest_version": "0.2",
     "name": "perplexity-web-mcp",
     "display_name": "Perplexity Web MCP Server",
-    "version": "0.9.0",
+    "version": "0.9.4",
     "description": "Connect Claude to Perplexity AI. Search the web with premium models — GPT-5, Claude Sonnet, Gemini, Grok — with real-time data, citations, and quota-aware routing.",
     "long_description": "This extension connects Claude Desktop to Perplexity AI via the Model Context Protocol. It provides 21 tools for web search, deep research, model selection, and in-band authentication.\n\n**Prerequisites:**\n1. Install the package: `pip install perplexity-web-mcp-cli` or `uv tool install perplexity-web-mcp-cli`\n2. Authenticate: Run `pwm login` to set up your Perplexity account\n\n**Features:**\n- Smart query with automatic model/quota routing\n- Access to all Perplexity models (GPT-5.4, Claude Sonnet 4.6, Gemini 3, Grok 4.1, etc.)\n- Deep Research for comprehensive reports\n- Extended thinking mode for complex analysis\n- Source focus: web, academic, social, finance\n- In-band authentication (no manual token management)",
     "author": {

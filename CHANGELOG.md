@@ -4,6 +4,26 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.9.4] - 2026-03-14
+
+### Added
+
+- **CC-Claw skill platform** — Added CC-Claw as a supported skill target (`pwm skill install cc-claw`). Skill path: `~/.cc-claw/workspace/skills/`. Total skill platforms: 9.
+- **Quick Start Guide** — New `docs/quickstart.md` covering installation, authentication, first query, MCP setup, diagnostics, models, and source focus.
+
+### Fixed
+
+- **Hardcoded path in model-update workflow** — Removed personal filesystem path from `.agents/workflows/model-update.md`.
+- **Desktop extension manifest version** — Bumped from stale 0.9.0 to match current release.
+- **Skill docs out of sync** — `skills/perplexity-web-mcp/SKILL.md` and `references/` synced from `data/` (v0.9.1 → v0.9.4, now includes full quota protocol and cost tables).
+
+### Changed
+
+- **docs/ un-gitignored** — `docs/` is now tracked (only `docs/plans/` remains ignored). Internal planning documents removed.
+- Skill metadata version bumped to 0.9.4.
+
+---
+
 ## [0.9.3] - 2026-03-13
 
 ### Changed

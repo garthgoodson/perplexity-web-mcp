@@ -8,7 +8,7 @@ description: >-
   or wants to query premium models like GPT-5.4, Claude, Gemini, Nemotron through
   Perplexity's web interface.
 metadata:
-  version: "0.9.1"
+  version: "0.9.4"
   author: "Jacob BD"
 ---
 
@@ -31,42 +31,109 @@ pwm login --check       # Check auth status
 
 1. **Authenticate first**: Run `pwm login` before any queries
 2. **Tokens last ~30 days**: Re-run `pwm login` on 403 errors
-3. **Check limits before heavy use**: Run `pwm usage` or call `pplx_usage()`
-4. **Deep Research uses a separate monthly quota**: Don't exhaust it accidentally
+3. **Check quota before your first query every session** (see protocol below)
+4. **Default to quick/Sonar** — only escalate when the query genuinely needs Pro
+5. **Never use Deep Research autonomously** — only when the user explicitly asks
 
-## Smart Routing (Recommended)
+## Quota-Aware Usage Protocol (MANDATORY)
+
+Perplexity has hard quota limits. Wasting Pro queries on simple lookups exhausts
+the weekly pool fast, leaving nothing for questions that actually need it.
+
+### Cost Model
+
+| Tier | What It Costs | Resets | Typical Pool |
+|------|---------------|--------|--------------|
+| **Sonar / quick** | FREE — no quota consumed | — | Unlimited |
+| **Pro Search** (standard/detailed, pplx_ask, pplx_query, all model-specific tools) | 1 Pro Search query | Weekly | ~300/week |
+| **Deep Research** (pplx_deep_research, research intent) | 1 Deep Research query | Monthly | ~5-10/month |
+
+### Before Every Session
+
+1. **Check quota first**: Call `pplx_usage()` (MCP) or `pwm usage` (CLI) before your first query.
+2. Review the remaining Pro and Research counts.
+3. If Pro < 20% remaining, restrict yourself to quick/Sonar for everything except user-requested Pro queries.
+
+### Before Every Query: Choose the Lowest Sufficient Tier
+
+Ask yourself: **"Can Sonar answer this?"** If yes, use `quick`. Only escalate if the answer is no.
+
+**Use quick (FREE — Sonar)** when the query is:
+- A factual lookup: "What is the capital of France?"
+- A definition: "What does CORS stand for?"
+- A simple current-event check: "Who won the Super Bowl?"
+- A quick status/version check: "What is the latest version of React?"
+- A straightforward how-to that's well-documented: "How do I create a venv in Python?"
+- A single-fact retrieval: "What is the population of Tokyo?"
+- A simple translation or conversion: "How many meters in a mile?"
+
+**Use standard (1 Pro Search)** when the query:
+- Needs synthesis across multiple web sources: "Compare Next.js and Remix for SSR"
+- Requires very current data from multiple sources: "What happened in AI this week?"
+- Asks for a how-to with nuance: "Best practices for PostgreSQL indexing in 2026"
+- Needs cited sources for credibility: "What are the side effects of metformin?"
+- Involves a real comparison or tradeoff analysis
+
+**Use detailed (1 Pro Search, premium model)** when the query:
+- Requires complex multi-step reasoning: "Analyze the pros/cons of microservices vs monolith for a 10-person startup"
+- Demands deep technical analysis: "Explain the differences between Raft and Paxos consensus algorithms"
+- Needs authoritative synthesis with reasoning: "What are the economic implications of the new EU AI Act?"
+
+**Use research (1 Deep Research — scarce)** ONLY when:
+- The user explicitly asks for "deep research", "comprehensive report", or similar
+- Never use autonomously — always ask the user first
+- Falls back to premium Pro Search if research quota is exhausted
+
+### Decision Flowchart
+
+```
+You want to query Perplexity...
+│
+├─ Is this a simple fact, definition, or well-known how-to?
+│  └─ YES → intent='quick' (FREE)
+│
+├─ Does it need multiple current web sources or cited synthesis?
+│  └─ YES → intent='standard' (1 Pro)
+│
+├─ Does it need deep reasoning, complex analysis, or premium model quality?
+│  └─ YES → intent='detailed' (1 Pro, premium model)
+│
+├─ Did the user explicitly request deep research / comprehensive report?
+│  └─ YES → intent='research' (1 Deep Research)
+│
+└─ When in doubt → intent='quick' (FREE, upgrade later if insufficient)
+```
+
+### Smart Routing
 
 The tool includes quota-aware routing. Instead of choosing a model manually,
 use the smart query interface and let it pick the best option:
 
 ```
-MCP:  pplx_smart_query(query, intent="standard")
-CLI:  pwm ask "query"                    # auto routes via smart logic
-CLI:  pwm ask "query" --intent quick     # explicit intent hint
+MCP:  pplx_smart_query(query, intent="quick")       # default for most lookups
+MCP:  pplx_smart_query(query, intent="standard")    # when quick isn't enough
+CLI:  pwm ask "query"                                # auto routes via smart logic
+CLI:  pwm ask "query" --intent quick                 # explicit intent hint
 ```
 
-### Intent Guide
+### Automatic Quota Protection
 
-| Intent | When to Use | What Happens |
-|--------|-------------|--------------|
-| quick | Simple facts, definitions, lookups | Sonar (no Pro quota used) |
-| standard | Normal questions (default) | Pro Search with auto model |
-| detailed | Complex analysis, comparisons | Premium model (Claude/GPT) |
-| research | Deep dives, comprehensive reports | Deep Research (monthly quota) |
-
-### Quota-Aware Behavior
-
+The smart router automatically protects you:
 - **Healthy quota**: Uses the ideal model for your intent
+- **Low quota (<20% pro remaining)**: Response footer warns you to conserve
 - **Critical quota (<10% pro remaining)**: Downgrades detailed→auto to conserve
 - **Exhausted quota**: Falls back to Sonar for everything except research
 - **Research exhausted**: Falls back to premium Pro Search
-- Response metadata shows what model was used and why
+- Response metadata shows what model was used, why, and remaining quota
 
 ### When to Use Explicit Models Instead
 
-- You need a *specific* model's capabilities (e.g., Gemini for multimodal)
-- You're comparing model outputs
-- The smart router's choice isn't working for your use case
+Only use model-specific tools (pplx_gpt54, pplx_claude_sonnet, etc.) when:
+- The user explicitly requests a specific model
+- You're comparing outputs across models
+- The smart router's choice isn't working for the specific use case
+
+Each explicit model call costs 1 Pro Search query — there is no free tier for these.
 
 ## Tool Detection
 
@@ -185,22 +252,22 @@ pwm usage --refresh         # Force-refresh from server
 
 ## MCP Tools Summary
 
-| Tool | Purpose |
-|------|---------|
-| `pplx_smart_query` | **Recommended**: quota-aware auto model selection |
-| `pplx_query` | Flexible: model + thinking + source selection |
-| `pplx_ask` | Quick Q&A (auto model) |
-| `pplx_deep_research` | In-depth reports (monthly quota) |
-| `pplx_sonar` | Perplexity Sonar model |
-| `pplx_gpt54` / `_thinking` | OpenAI GPT-5.4 |
-| `pplx_claude_sonnet` / `_think` | Anthropic Claude 4.6 Sonnet |
-| `pplx_claude_opus` / `_think` | Anthropic Claude 4.6 Opus |
-| `pplx_gemini_pro_think` | Google Gemini 3.1 Pro (thinking always on) |
-| `pplx_nemotron_thinking` | NVIDIA Nemotron 3 Super (thinking always on) |
-| `pplx_usage` | Check remaining quotas |
-| `pplx_auth_status` | Check auth status |
-| `pplx_auth_request_code` | Send verification code |
-| `pplx_auth_complete` | Complete auth with code |
+| Tool | Cost | Purpose |
+|------|------|---------|
+| `pplx_smart_query` | **Varies by intent** | **USE THIS BY DEFAULT** — quota-aware auto routing |
+| `pplx_sonar` | **FREE** | Perplexity Sonar model (no Pro quota used) |
+| `pplx_query` | 1 Pro | Explicit model selection with thinking toggle |
+| `pplx_ask` | 1 Pro | Quick Q&A (auto model) |
+| `pplx_gpt54` / `_thinking` | 1 Pro | OpenAI GPT-5.4 |
+| `pplx_claude_sonnet` / `_think` | 1 Pro | Anthropic Claude 4.6 Sonnet |
+| `pplx_claude_opus` / `_think` | 1 Pro | Anthropic Claude 4.6 Opus |
+| `pplx_gemini_pro_think` | 1 Pro | Google Gemini 3.1 Pro (thinking always on) |
+| `pplx_nemotron_thinking` | 1 Pro | NVIDIA Nemotron 3 Super (thinking always on) |
+| `pplx_deep_research` | 1 Research | In-depth reports (**scarce monthly quota**) |
+| `pplx_usage` | FREE | Check remaining quotas |
+| `pplx_auth_status` | FREE | Check auth status |
+| `pplx_auth_request_code` | FREE | Send verification code |
+| `pplx_auth_complete` | FREE | Complete auth with code |
 
 All query tools accept `source_focus`: `"none"`, `"web"`, `"academic"`, `"social"`, `"finance"`, `"all"`.
 Use `source_focus="none"` for model-only queries without web search.

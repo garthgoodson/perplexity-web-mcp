@@ -74,7 +74,7 @@ python scripts/detect_model_changes.py --save
 
 ```bash
 // turbo
-cd /Users/jbendavi/dev_projects/perplexity-web-mcp && python -m pytest tests/ -x -q
+python -m pytest tests/ -x -q
 ```
 
 ## Key Technical Details

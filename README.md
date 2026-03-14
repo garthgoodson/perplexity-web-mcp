@@ -16,7 +16,7 @@ Use your Perplexity Pro/Max subscription to access premium models (GPT-5.4, Clau
 - **8 Models**: GPT-5.4, Claude 4.6 Opus, Claude 4.6 Sonnet, Gemini 3.1 Pro, Nemotron 3 Super, Sonar
 - **Thinking Mode**: Extended thinking support for all compatible models
 - **Deep Research**: Full support for Perplexity's Deep Research mode
-- **Setup & Skill Management**: Auto-configure MCP for Claude Code, Cursor, Windsurf, Gemini CLI, Codex, Cline, Antigravity; install Agent Skills across 8 platforms
+- **Setup & Skill Management**: Auto-configure MCP for Claude Code, Cursor, Windsurf, Gemini CLI, Codex, Cline, Antigravity; install Agent Skills across 9 platforms
 - **Doctor**: Diagnose installation, auth, config, rate limits, and skill status
 
 ## Vibe Coding Alert
@@ -477,6 +477,7 @@ pwm skill install antigravity
 pwm skill install cline
 pwm skill install opencode
 pwm skill install openclaw
+pwm skill install cc-claw
 ```
 
 The skill follows Anthropic's Agent Skills open standard and works across any compliant AI platform.
