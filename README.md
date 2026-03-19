@@ -33,6 +33,9 @@ Full transparency: this project was built by a non-developer using AI coding ass
 
 The goal here was to learn — both about building CLI tools in Python and about how modern web applications work under the hood. The code works, but it's very much a learning project released solely for the purpose of research and education, not a polished product.
 
+> [!WARNING]
+> **Unofficial & Unsupported** — This project is **not affiliated with, endorsed by, or supported by Perplexity AI**. It interacts with Perplexity's web interface through unofficial, undocumented methods that may break at any time without notice if Perplexity changes their internal APIs or RPCs. Use at your own risk. The author(s) accept no responsibility for any consequences to your Perplexity account, including but not limited to rate limiting, suspension, or termination. This project is released strictly for **educational and research purposes only**.
+
 **If you know better, teach us.** PRs, issues, and architectural advice are all welcome. This is open source specifically because human expertise is irreplaceable.
 
 ---
