@@ -24,6 +24,10 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 - All documentation surfaces updated: SKILL.md, `pwm --ai`, CLAUDE.md, README.md, quickstart.md.
 - 11 new council CLI tests + updated usage tests.
 
+### Contributors
+
+- **[@dangeReis](https://github.com/dangeReis)** — Model Council implementation (PR [#1](https://github.com/jacob-bd/perplexity-web-mcp/pull/1)). Thank you for this awesome contribution! 🎉
+
 ---
 
 ## [0.9.5] - 2026-03-16
