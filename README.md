@@ -514,7 +514,7 @@ pwm skill install antigravity
 pwm skill install cline
 pwm skill install opencode
 pwm skill install openclaw
-pwm skill install cc-claw
+pwm skill install alef-agent
 ```
 
 The skill follows Anthropic's Agent Skills open standard and works across any compliant AI platform.

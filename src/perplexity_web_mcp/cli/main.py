@@ -565,7 +565,7 @@ def skill(args):
 
     \b
     Tools: claude-code, cursor, codex, opencode, gemini-cli,
-           antigravity, cline, openclaw, cc-claw, all
+           antigravity, cline, openclaw, alef-agent, all
     """
     from perplexity_web_mcp.cli.skill import cmd_skill
 

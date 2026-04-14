@@ -4,6 +4,14 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.10.2] - 2026-04-14
+
+### Changed
+
+- **Alef Agent skill platform** — Renamed `cc-claw` to `alef-agent` to reflect the tool's new name. Skill path updated to `~/.alef-agent/workspace/skills/`. Use `pwm skill install alef-agent`.
+
+---
+
 ## [0.10.0] - 2026-03-21
 
 ### Added
