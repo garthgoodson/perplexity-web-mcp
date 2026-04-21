@@ -786,7 +786,7 @@ class TestIntegrationRateLimits:
         token = load_token()
         settings = fetch_user_settings(token)
         assert settings is not None
-        assert settings.upload_limit > 0
+        assert settings.upload_limit >= 0
         assert settings.connector_limits.max_file_size_mb > 0
 
     def test_fetch_with_invalid_token(self) -> None:

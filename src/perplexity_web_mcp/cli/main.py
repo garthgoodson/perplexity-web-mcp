@@ -524,7 +524,7 @@ def api(host, port, default_model, log_level):
 # ── Hack ───────────────────────────────────────────────────────────────────
 
 
-@cli.command()
+@cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("tool")
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context

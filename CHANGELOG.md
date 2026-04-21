@@ -4,6 +4,19 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.10.3] - 2026-04-21
+
+### Fixed
+
+- **`pwm hack claude -m` flag passthrough** -- Click was intercepting unknown flags like `-m` before they could reach the Claude subprocess. Added `ignore_unknown_options` so flags pass through correctly. (Issue #4, thanks @garthgoodson!)
+- **Flaky integration test** -- `test_fetch_user_settings_has_limits` was asserting `upload_limit > 0`, which fails for free-tier accounts. Relaxed to `>= 0`.
+
+### Added
+
+- **Alef Agent skill frontmatter** -- When installing the skill for `alef-agent`, the SKILL.md now gets `type: tool` and `status: approved` injected into its frontmatter for Alef Agent compatibility. No other targets are affected.
+
+---
+
 ## [0.10.2] - 2026-04-14
 
 ### Changed

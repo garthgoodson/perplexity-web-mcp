@@ -6,6 +6,7 @@ to the appropriate location for each supported AI platform.
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ class SkillTarget:
     description: str
     user_dir: Path
     project_dir: str
+    frontmatter_extras: dict[str, str] | None = None
 
 
 def _home() -> Path:
@@ -87,6 +89,7 @@ def _get_targets() -> list[SkillTarget]:
             description="Alef Agent AI framework",
             user_dir=home / ".alef-agent" / "workspace" / "skills",
             project_dir=".alef-agent/workspace/skills",
+            frontmatter_extras={"type": "tool", "status": "approved"},
         ),
         SkillTarget(
             name="other",
@@ -188,6 +191,31 @@ def _install_skill(source: Path, dest_dir: Path) -> bool:
     except OSError as e:
         print(f"  Error: {e}", file=sys.stderr)
         return False
+
+
+def _inject_frontmatter_extras(skill_path: Path, extras: dict[str, str]) -> None:
+    """Inject extra frontmatter fields into SKILL.md for target-specific compatibility.
+
+    Used to add fields like ``type: tool`` and ``status: approved`` for Alef Agent.
+    Only called when a SkillTarget defines ``frontmatter_extras``.
+    """
+    if not skill_path.exists():
+        return
+    content = skill_path.read_text(encoding="utf-8")
+    if not content.startswith("---"):
+        return
+
+    end_idx = content.index("---", 3)
+    frontmatter = content[3:end_idx]
+
+    for key, value in extras.items():
+        # Remove any existing line for this key
+        frontmatter = re.sub(rf"\n{re.escape(key)}:.*", "", frontmatter)
+        # Append the field
+        frontmatter = frontmatter.rstrip() + f"\n{key}: {value}\n"
+
+    content = "---" + frontmatter + "---" + content[end_idx + 3 :]
+    skill_path.write_text(content, encoding="utf-8")
 
 
 def _uninstall_skill(dest_dir: Path) -> bool:
@@ -329,6 +357,10 @@ def _install_all(targets: list[SkillTarget], current_version: str) -> int:
             continue
         t.user_dir.mkdir(parents=True, exist_ok=True)
         if _install_skill(source, t.user_dir):
+            if t.frontmatter_extras:
+                _inject_frontmatter_extras(
+                    t.user_dir / SKILL_DIR_NAME / "SKILL.md", t.frontmatter_extras
+                )
             if existing_ver:
                 print(f"  ✓ {t.name}: v{existing_ver} → v{current_version}")
             else:
@@ -472,6 +504,10 @@ def cmd_skill(args: list[str]) -> int:
 
             dest.mkdir(parents=True, exist_ok=True)
             if _install_skill(source, dest):
+                if target.frontmatter_extras:
+                    _inject_frontmatter_extras(
+                        dest / SKILL_DIR_NAME / "SKILL.md", target.frontmatter_extras
+                    )
                 print(f"  {tool_name}: Skill installed (v{current_version}) at {dest / SKILL_DIR_NAME}")
                 return 0
             return 1
@@ -520,6 +556,10 @@ def cmd_skill(args: list[str]) -> int:
                 tool_installed = True
                 if installed_ver != current_version:
                     if _install_skill(source, dest):
+                        if t.frontmatter_extras:
+                            _inject_frontmatter_extras(
+                                dest / SKILL_DIR_NAME / "SKILL.md", t.frontmatter_extras
+                            )
                         level = "project" if str(Path.cwd()) in abs_path else "user"
                         print(f"  ✓ {t.name} ({level}): v{installed_ver} → v{current_version}")
                         updated_tools.append(t.name)
