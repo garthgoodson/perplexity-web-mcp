@@ -37,6 +37,7 @@ import logging
 import os
 import time
 import uuid
+import copy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -968,6 +969,142 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+
+
+def find_tool_by_name(tools: list[dict[str, Any]] | None, name: str) -> dict[str, Any] | None:
+    """Return the first tool with the given name."""
+    if not tools:
+        return None
+    for tool in tools:
+        if isinstance(tool, dict) and str(tool.get("name", "")).strip() == name:
+            return tool
+    return None
+
+
+def extract_simple_file_write_request(user_text: str) -> tuple[str, str] | None:
+    """Extract (filename, content) for simple file-write requests.
+
+    Handles prompts like:
+    - create a test text file called foo.txt with the word hello inside
+    - write a file named foo.txt containing hello
+    """
+    import re as _re
+
+    text = user_text.strip()
+
+    filename_match = _re.search(
+        r'(?:file\s+(?:called|named)?|called|named)\s+([A-Za-z0-9._/-]+)',
+        text,
+        _re.IGNORECASE,
+    )
+    if not filename_match:
+        return None
+
+    filename = filename_match.group(1).strip()
+
+    content_match = _re.search(
+        r'(?:with\s+(?:the\s+)?(?:word|text|contents?)\s+|containing\s+)(.+?)(?:\s+inside)?$',
+        text,
+        _re.IGNORECASE,
+    )
+    if not content_match:
+        return None
+
+    content = content_match.group(1).strip().strip('"').strip("'")
+    if not filename or not content:
+        return None
+
+    return filename, content + "\n"
+
+
+async def maybe_build_direct_file_write_tool_use(
+    model_name: str,
+    messages: list[MessageParam],
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Build a direct Claude tool_use for simple file creation requests."""
+    if not tools:
+        return None
+
+    user_text = extract_last_user_text(messages)
+    if not user_text:
+        return None
+
+    parsed = extract_simple_file_write_request(user_text)
+    if parsed is None:
+        return None
+
+    filename, content = parsed
+
+    write_tool = find_tool_by_name(tools, "Write")
+    bash_tool = find_tool_by_name(tools, "Bash")
+
+    cwd = str(Path.cwd())
+    abs_path = str((Path(cwd) / filename).resolve())
+
+    tool_name = None
+    tool_input: dict[str, Any] | None = None
+
+    if write_tool is not None:
+        tool_name = "Write"
+        tool_input = {
+            "file_path": abs_path,
+            "content": content,
+        }
+    elif bash_tool is not None:
+        escaped = content[:-1].replace("'", "'"'"'")
+        tool_name = "Bash"
+        tool_input = {
+            "command": f"printf '%s\\n' '{escaped}' > '{abs_path}'",
+            "description": f"Create {filename} with requested content",
+            "timeout": 120000,
+        }
+    else:
+        return None
+
+    logging.debug(
+        "Claude direct file-write fast path selected: tool=%s input=%s",
+        tool_name,
+        json.dumps(tool_input, default=str),
+    )
+
+    input_tokens = estimate_tokens(user_text)
+    approval_required = claude_protocol.requires_approval(tool_name)
+    tool_use_id, approval_request_id = await register_pending_tool_call(
+        model_name=model_name,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        original_user_text=user_text,
+        requires_approval=approval_required,
+        approval_reason="This tool appears to modify files or workspace state.",
+    )
+
+    if approval_required and approval_request_id is not None:
+        approval_payload = claude_protocol.build_openai_mcp_approval_request(
+            tool_name,
+            tool_input,
+            reason="This tool appears to modify files or workspace state.",
+        )
+        approval_payload["approval_request_id"] = approval_request_id
+        tool_input = {
+            **tool_input,
+            "_approval": approval_payload,
+        }
+
+    tool_block = claude_protocol.build_tool_use_block(
+        name=tool_name,
+        tool_input=tool_input,
+        tool_use_id=tool_use_id,
+    )
+    return claude_protocol.tool_use_stop_response(
+        message_id=f"msg_{uuid.uuid4().hex[:24]}",
+        model=model_name,
+        content=[tool_block],
+        input_tokens=input_tokens,
+        output_tokens=estimate_tokens(tool_name),
+    )
+
+
 def validate_planned_tool_call(
     plan: dict[str, Any],
     tools: list[dict[str, Any]] | None,
@@ -997,6 +1134,20 @@ async def plan_claude_tool_use(
     system_text: str | None,
     tools: list[dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
+
+    direct_output = await maybe_build_direct_file_write_tool_use(
+        model_name=model_name,
+        messages=messages,
+        tools=tools,
+    )
+    if direct_output is not None:
+        return direct_output
+
+    logging.debug("Claude plan_claude_tool_use received tools count: %d", len(tools or []))
+    logging.debug(
+        "Claude plan_claude_tool_use tool names: %s",
+        [tool.get("name") for tool in (tools or []) if isinstance(tool, dict)],
+    )
     """Directly extract the best tool call for the user's request.
 
     Returns a Claude-compatible protocol response if a valid tool call is planned.
@@ -1175,6 +1326,11 @@ async def maybe_build_claude_protocol_response(
                 break
 
     input_tokens = len(latest_text) // 4
+    logging.debug("Claude planner tools count: %d", len(tools or []))
+    logging.debug(
+        "Claude planner tool names: %s",
+        [tool.get("name") for tool in (tools or []) if isinstance(tool, dict)],
+    )
     protocol_output = await maybe_build_tool_protocol_response(
         request_model=model_name,
         messages=messages,
@@ -1887,12 +2043,14 @@ async def create_message(body: MessagesRequest, request: Request):
     # Claude-native tools should exist on MessagesRequest, but guard anyway so this
     # path can tolerate mixed payloads during compatibility work.
     body_tools = getattr(body, "tools", None)
+    incoming_tools = copy.deepcopy(body_tools or [])
     logging.debug("Claude request tools: %s", json.dumps(body_tools, default=str))
+    logging.debug("Claude incoming tools count: %d", len(incoming_tools))
     protocol_output = await maybe_build_claude_protocol_response(
         model_name=body.model,
         messages=body.messages,
         system_text=system_text,
-        tools=body_tools,
+        tools=incoming_tools,
     )
     if protocol_output is not None:
         logger.debug("Claude protocol output: %s", json.dumps(protocol_output, default=str))
