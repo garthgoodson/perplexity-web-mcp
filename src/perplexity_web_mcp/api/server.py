@@ -1330,91 +1330,6 @@ def responses_tools_to_claude_tools(tools: list[dict[str, Any]] | None) -> list[
     return [tool for tool in tools if isinstance(tool, dict)]
 
 
-def maybe_build_responses_protocol_output(
-    model_name: str,
-    user_input: str,
-    tools: list[dict[str, Any]] | None,
-) -> dict[str, Any] | None:
-    """Return a minimal MCP/tool-call style protocol response for /v1/responses."""
-    normalized_tools = claude_protocol.extract_tool_definitions(
-        responses_tools_to_claude_tools(tools)
-    )
-    if not normalized_tools:
-        return None
-
-    lowered = user_input.lower()
-    write_markers = (
-        "write",
-        "edit",
-        "modify",
-        "update",
-        "create file",
-        "save",
-        "delete",
-        "rename",
-        "move file",
-        "replace",
-        "patch",
-    )
-    if not any(marker in lowered for marker in write_markers):
-        return None
-
-    tool = normalized_tools[0]
-    tool_input = {"query": user_input}
-
-    if claude_protocol.requires_approval(tool.name):
-        approval = claude_protocol.build_openai_mcp_approval_request(
-            tool.name,
-            tool_input,
-            reason="This tool appears to modify files or workspace state.",
-        )
-        return {
-            "id": f"resp_{uuid.uuid4().hex[:24]}",
-            "object": "response",
-            "created_at": int(time.time()),
-            "status": "requires_action",
-            "model": model_name,
-            "output": [
-                approval,
-                {
-                    "type": "mcp_call",
-                    "id": f"mcpl_{uuid.uuid4().hex[:24]}",
-                    "tool_name": tool.name,
-                    "arguments": tool_input,
-                    "status": "pending_approval",
-                },
-            ],
-            "output_text": "",
-            "usage": {
-                "prompt_tokens": estimate_tokens(user_input),
-                "completion_tokens": 0,
-                "total_tokens": estimate_tokens(user_input),
-            },
-        }
-
-    return {
-        "id": f"resp_{uuid.uuid4().hex[:24]}",
-        "object": "response",
-        "created_at": int(time.time()),
-        "status": "requires_action",
-        "model": model_name,
-        "output": [
-            {
-                "type": "mcp_call",
-                "id": f"mcpl_{uuid.uuid4().hex[:24]}",
-                "tool_name": tool.name,
-                "arguments": tool_input,
-                "status": "completed",
-            }
-        ],
-        "output_text": "",
-        "usage": {
-            "prompt_tokens": estimate_tokens(user_input),
-            "completion_tokens": 0,
-            "total_tokens": estimate_tokens(user_input),
-        },
-    }
-
 async def run_perplexity_query(
     model: Model,
     query: str,
@@ -1562,7 +1477,12 @@ async def create_message(request: Request, body: MessagesRequest):
     thinking_enabled = body.thinking is not None and body.thinking.get("type") == "enabled"
     model = get_model(body.model, thinking=thinking_enabled)
 
-    system_text = body.instructions or responses_input_to_instructions(body.input)
+    input_value = getattr(body, "input", None)
+    system_text = (
+        getattr(body, "system", None)
+        or getattr(body, "instructions", None)
+        or (responses_input_to_instructions(input_value) if input_value is not None else None)
+    )    
     thinking_enabled = is_thinking_enabled(reasoning=body.reasoning)
     model = get_model(body.model, thinking=thinking_enabled)
 
@@ -2192,6 +2112,7 @@ async def responses_websocket(websocket: WebSocket):
         response_id = f"resp_{uuid.uuid4().hex[:24]}"
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
         event_created_id = f"event_{uuid.uuid4().hex[:24]}"
+        input_token_count = estimate_tokens(query)
 
         created_payload = {
             "event_id": event_created_id,
@@ -2203,7 +2124,11 @@ async def responses_websocket(websocket: WebSocket):
                 "status_details": None,
                 "model": model_name,
                 "output": [],
-                "usage": None,
+                "usage": {
+                    "input_tokens": input_token_count,
+                    "output_tokens": 0,
+                    "total_tokens": input_token_count,
+                },
                 "metadata": None,
             },
         }
@@ -2343,6 +2268,13 @@ async def responses_websocket(websocket: WebSocket):
                     }
                     await websocket.send_json(item_done_event)
 
+            protocol_output_text = str(protocol_output.get("output_text", ""))
+            protocol_usage = protocol_output.get("usage") or {
+                "input_tokens": input_token_count,
+                "output_tokens": estimate_tokens(protocol_output_text),
+                "total_tokens": input_token_count + estimate_tokens(protocol_output_text),
+            }
+
             completed_payload = {
                 "event_id": f"event_{uuid.uuid4().hex[:24]}",
                 "type": "response.completed",
@@ -2353,9 +2285,9 @@ async def responses_websocket(websocket: WebSocket):
                     "status_details": None,
                     "model": model_name,
                     "output": output_items,
-                    "usage": protocol_output.get("usage"),
+                    "usage": protocol_usage,
                     "metadata": None,
-                    "output_text": protocol_output.get("output_text", ""),
+                    "output_text": protocol_output_text,
                 },
             }
             logging.debug("Responses websocket sending protocol completed event")
@@ -2372,6 +2304,7 @@ async def responses_websocket(websocket: WebSocket):
         event_completed_id = f"event_{uuid.uuid4().hex[:24]}"
 
         response_text = await run_perplexity_query(model=model, query=query, system_text=system_text)
+        output_token_count = estimate_tokens(response_text)
 
         content_part_added_payload = {
             "event_id": event_part_added_id,
@@ -2464,7 +2397,11 @@ async def responses_websocket(websocket: WebSocket):
                 "status_details": None,
                 "model": model_name,
                 "output": [output_item],
-                "usage": None,
+                "usage": {
+                    "input_tokens": input_token_count,
+                    "output_tokens": output_token_count,
+                    "total_tokens": input_token_count + output_token_count,
+                },
                 "metadata": None,
                 "output_text": response_text,
             },
