@@ -680,17 +680,24 @@ def claude_latest_user_text(messages) -> str:
     return ""
 
 
-def claude_input_to_query(messages: list[dict[str, Any]]) -> str:
-    """Extract the latest meaningful user text from Claude messages."""
+def claude_input_to_query(messages) -> str:
+    """Extract the latest meaningful user text from Claude messages.
+
+    Supports both MessageParam objects and dict-shaped messages.
+    """
     latest_user_text = ""
 
     for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if str(message.get("role", "")).strip().lower() != "user":
+        role = getattr(message, "role", None)
+        content = getattr(message, "content", None)
+
+        if isinstance(message, dict):
+            role = message.get("role")
+            content = message.get("content")
+
+        if str(role or "").strip().lower() != "user":
             continue
 
-        content = message.get("content", "")
         if isinstance(content, str):
             candidate = content.strip()
             if candidate:
@@ -700,12 +707,18 @@ def claude_input_to_query(messages: list[dict[str, Any]]) -> str:
         if isinstance(content, list):
             parts: list[str] = []
             for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text":
-                    part = str(block.get("text", "")).strip()
+                block_type = getattr(block, "type", None)
+                text_value = getattr(block, "text", None)
+
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    text_value = block.get("text")
+
+                if block_type == "text":
+                    part = str(text_value or "").strip()
                     if part:
                         parts.append(part)
+
             candidate = "\n".join(parts).strip()
             if candidate:
                 latest_user_text = candidate
@@ -835,6 +848,182 @@ def is_thinking_enabled(
         if effort in ("medium", "high", "xhigh"):
             return True
     return False
+
+
+
+
+def normalize_tool_name_set(tools: list[dict[str, Any]] | None) -> set[str]:
+    """Return the set of valid tool names from the request."""
+    valid: set[str] = set()
+    if not tools:
+        return valid
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name", "")).strip()
+        if name:
+            valid.add(name)
+    return valid
+
+
+def extract_json_object(text: str) -> dict[str, Any] | None:
+    """Best-effort extraction of a top-level JSON object from model text."""
+    text = text.strip()
+    if not text:
+        return None
+
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+
+    snippet = text[start:end + 1]
+    try:
+        obj = json.loads(snippet)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        return None
+    return None
+
+
+def validate_planned_tool_call(
+    plan: dict[str, Any],
+    tools: list[dict[str, Any]] | None,
+) -> tuple[str, dict[str, Any]] | None:
+    """Validate a structured tool plan against the provided tool list."""
+    if not isinstance(plan, dict):
+        return None
+
+    if not bool(plan.get("use_tool")):
+        return None
+
+    tool_name = str(plan.get("tool_name", "")).strip()
+    tool_input = plan.get("input")
+
+    if not tool_name or not isinstance(tool_input, dict):
+        return None
+
+    valid_tool_names = normalize_tool_name_set(tools)
+    if tool_name not in valid_tool_names:
+        return None
+
+    return tool_name, tool_input
+
+
+async def plan_claude_tool_use(
+    model_name: str,
+    messages: list[MessageParam],
+    system_text: str | None,
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Ask Perplexity for a strict JSON decision about whether to call a tool.
+
+    Returns a Claude-compatible protocol response if a valid tool call is planned,
+    otherwise returns None and the caller should fall back to normal text response.
+    """
+    if not tools:
+        return None
+
+    user_text = extract_last_user_text(messages)
+    if not user_text:
+        return None
+
+    tool_descriptions: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name", "")).strip()
+        if not name:
+            continue
+        description = str(tool.get("description", "")).strip()
+        input_schema = tool.get("input_schema", {})
+        tool_descriptions.append(
+            json.dumps(
+                {
+                    "name": name,
+                    "description": description,
+                    "input_schema": input_schema,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    if not tool_descriptions:
+        return None
+
+    planning_prompt = (
+        "You are deciding whether the assistant should call one of the available tools.\n\n"
+        "Return ONLY valid JSON with no markdown fences and no extra text.\n"
+        "Use exactly one of these shapes:\n"
+        '{"use_tool": true, "tool_name": "TOOL_NAME", "input": {...}}\n'
+        '{"use_tool": false, "assistant_response": "text"}\n\n'
+        "Rules:\n"
+        "- Set use_tool=true only if a tool is clearly needed to help with the user's request.\n"
+        "- tool_name must exactly match one of the provided tool names.\n"
+        "- input must be a JSON object matching the selected tool as closely as possible.\n"
+        "- If uncertain, respond with use_tool=false.\n"
+        "- Do not invent tool names.\n"
+        "- Do not include explanations outside the JSON.\n\n"
+        f"Available tools:\n" + "\n".join(tool_descriptions) + "\n\n"
+        f"Latest user request:\n{user_text}"
+    )
+
+    planning_text = await run_perplexity_query(
+        model=get_model(model_name),
+        query=planning_prompt,
+        system_text=system_text,
+    )
+
+    plan = extract_json_object(planning_text)
+    validated = validate_planned_tool_call(plan, tools)
+    if validated is None:
+        return None
+
+    tool_name, tool_input = validated
+    input_tokens = estimate_tokens(user_text)
+
+    approval_required = claude_protocol.requires_approval(tool_name)
+    tool_use_id, approval_request_id = await register_pending_tool_call(
+        model_name=model_name,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        original_user_text=user_text,
+        requires_approval=approval_required,
+        approval_reason="This tool appears to modify files or workspace state.",
+    )
+
+    if approval_required and approval_request_id is not None:
+        approval_payload = claude_protocol.build_openai_mcp_approval_request(
+            tool_name,
+            tool_input,
+            reason="This tool appears to modify files or workspace state.",
+        )
+        approval_payload["approval_request_id"] = approval_request_id
+        tool_input = {
+            **tool_input,
+            "_approval": approval_payload,
+        }
+
+    tool_block = claude_protocol.build_tool_use_block(
+        name=tool_name,
+        tool_input=tool_input,
+        tool_use_id=tool_use_id,
+    )
+    return claude_protocol.tool_use_stop_response(
+        message_id=f"msg_{uuid.uuid4().hex[:24]}",
+        model=model_name,
+        content=[tool_block],
+        input_tokens=input_tokens,
+        output_tokens=estimate_tokens(tool_name),
+    )
 
 
 def estimate_tokens(text: str) -> int:
@@ -1020,31 +1209,39 @@ async def maybe_build_claude_protocol_response(
     system_text: str | None,
     tools: list[dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
-    """Claude-specific wrapper around the shared tool protocol helper.
+    """Claude-specific protocol wrapper.
 
-    Keep the original message objects intact for the shared helper, then
-    post-process the returned Claude tool_use payload so that input.query
-    contains only the latest real user request rather than expanded prompt
-    scaffolding or retry boilerplate.
+    Order of operations:
+    1. Continue existing tool_result flows.
+    2. Try validated structured planning for a fresh tool call.
+    3. Fall back to normal Claude text response.
     """
-    input_tokens = estimate_tokens(claude_input_to_query(messages))
+    input_tokens = estimate_tokens(extract_last_user_text(messages) or "")
     protocol_output = await maybe_build_tool_protocol_response(
         request_model=model_name,
         messages=messages,
         tools=tools,
         input_tokens=input_tokens,
     )
-
-    if not protocol_output:
+    if protocol_output is not None:
         return protocol_output
+
+    planned_output = await plan_claude_tool_use(
+        model_name=model_name,
+        messages=messages,
+        system_text=system_text,
+        tools=tools,
+    )
+    if planned_output is None:
+        return None
 
     latest_user_text = claude_latest_user_text(messages)
     if not latest_user_text:
-        return protocol_output
+        return planned_output
 
-    content = protocol_output.get("content")
+    content = planned_output.get("content")
     if not isinstance(content, list):
-        return protocol_output
+        return planned_output
 
     for block in content:
         if not isinstance(block, dict):
@@ -1054,10 +1251,11 @@ async def maybe_build_claude_protocol_response(
         tool_input = block.get("input")
         if not isinstance(tool_input, dict):
             continue
-        if "query" in tool_input:
+        if "query" in tool_input and not str(tool_input["query"]).strip():
             tool_input["query"] = latest_user_text
 
-    return protocol_output
+    return planned_output
+
 
 async def maybe_build_tool_protocol_response(
     request_model: str,
