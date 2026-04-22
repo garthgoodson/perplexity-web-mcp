@@ -2168,6 +2168,7 @@ async def responses_websocket(websocket: WebSocket):
         query = extract_latest_user_text_from_responses_input(raw_input)
         thinking_enabled = is_thinking_enabled(reasoning=payload.get("reasoning"))
         model = get_model(model_name, thinking=thinking_enabled)
+        tools = payload.get("tools")
 
         logging.debug(
             "Responses websocket parsed: type=%s model=%s thinking=%s query=%r tools_present=%s",
@@ -2175,7 +2176,7 @@ async def responses_websocket(websocket: WebSocket):
             model_name,
             thinking_enabled,
             query[:500],
-            bool(payload.get("tools")),
+            bool(tools),
         )
 
         if payload_type and payload_type != "response.create":
@@ -2190,14 +2191,20 @@ async def responses_websocket(websocket: WebSocket):
 
         response_id = f"resp_{uuid.uuid4().hex[:24]}"
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
+        event_created_id = f"event_{uuid.uuid4().hex[:24]}"
 
         created_payload = {
+            "event_id": event_created_id,
             "type": "response.created",
             "response": {
                 "id": response_id,
-                "object": "response",
+                "object": "realtime.response",
                 "status": "in_progress",
+                "status_details": None,
                 "model": model_name,
+                "output": [],
+                "usage": None,
+                "metadata": None,
             },
         }
 
@@ -2211,45 +2218,254 @@ async def responses_websocket(websocket: WebSocket):
         logging.debug("Responses websocket sending created event")
         await websocket.send_json(created_payload)
 
+        protocol_output = await maybe_build_responses_protocol_output(
+            model_name=model_name,
+            user_input=query,
+            tools=tools if isinstance(tools, list) else None,
+            raw_input=raw_input,
+        )
+
+        if protocol_output is not None:
+            logging.debug(
+                "Responses websocket using protocol output: status=%s output_types=%s",
+                protocol_output.get("status"),
+                [item.get("type") for item in protocol_output.get("output", [])],
+            )
+
+            output_items = protocol_output.get("output", [])
+            for idx, item in enumerate(output_items):
+                item_id = str(item.get("id", f"item_{uuid.uuid4().hex[:24]}"))
+                item_type = str(item.get("type", ""))
+
+                if item_type == "mcp_approval_request":
+                    approval_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.output_item.done",
+                        "response_id": response_id,
+                        "output_index": idx,
+                        "item": {
+                            "id": item_id,
+                            "object": "realtime.item",
+                            "type": "mcp_approval_request",
+                            "status": "completed",
+                            "approval_request_id": item.get("approval_request_id"),
+                            "tool_name": item.get("tool_name"),
+                            "input": item.get("input"),
+                            "reason": item.get("reason"),
+                        },
+                    }
+                    logging.debug("Responses websocket sending approval request item")
+                    await websocket.send_json(approval_event)
+
+                elif item_type == "mcp_call":
+                    tool_call_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.output_item.done",
+                        "response_id": response_id,
+                        "output_index": idx,
+                        "item": {
+                            "id": item_id,
+                            "object": "realtime.item",
+                            "type": "function_call",
+                            "status": item.get("status", "completed"),
+                            "name": item.get("tool_name"),
+                            "call_id": item.get("id"),
+                            "arguments": json.dumps(item.get("arguments", {})),
+                        },
+                    }
+                    logging.debug("Responses websocket sending tool call item")
+                    await websocket.send_json(tool_call_event)
+
+                elif item_type == "message":
+                    content = item.get("content", [])
+                    text_value = ""
+                    if isinstance(content, list) and content:
+                        first = content[0]
+                        if isinstance(first, dict):
+                            text_value = str(first.get("text", ""))
+
+                    part_added_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.content_part.added",
+                        "response_id": response_id,
+                        "item_id": item_id,
+                        "output_index": idx,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": "",
+                            "annotations": [],
+                        },
+                    }
+                    await websocket.send_json(part_added_event)
+
+                    delta_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.output_text.delta",
+                        "response_id": response_id,
+                        "item_id": item_id,
+                        "output_index": idx,
+                        "content_index": 0,
+                        "delta": text_value,
+                    }
+                    await websocket.send_json(delta_event)
+
+                    done_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.output_text.done",
+                        "response_id": response_id,
+                        "item_id": item_id,
+                        "output_index": idx,
+                        "content_index": 0,
+                        "text": text_value,
+                    }
+                    await websocket.send_json(done_event)
+
+                    item_done_event = {
+                        "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                        "type": "response.output_item.done",
+                        "response_id": response_id,
+                        "output_index": idx,
+                        "item": {
+                            "id": item_id,
+                            "object": "realtime.item",
+                            "type": "message",
+                            "status": "completed",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": text_value,
+                                    "annotations": [],
+                                }
+                            ],
+                        },
+                    }
+                    await websocket.send_json(item_done_event)
+
+            completed_payload = {
+                "event_id": f"event_{uuid.uuid4().hex[:24]}",
+                "type": "response.completed",
+                "response": {
+                    "id": response_id,
+                    "object": "realtime.response",
+                    "status": protocol_output.get("status", "completed"),
+                    "status_details": None,
+                    "model": model_name,
+                    "output": output_items,
+                    "usage": protocol_output.get("usage"),
+                    "metadata": None,
+                    "output_text": protocol_output.get("output_text", ""),
+                },
+            }
+            logging.debug("Responses websocket sending protocol completed event")
+            await websocket.send_json(completed_payload)
+            logging.debug("Responses websocket closing cleanly")
+            await websocket.close(code=1000)
+            return
+
+        event_part_added_id = f"event_{uuid.uuid4().hex[:24]}"
+        event_text_delta_id = f"event_{uuid.uuid4().hex[:24]}"
+        event_text_done_id = f"event_{uuid.uuid4().hex[:24]}"
+        event_part_done_id = f"event_{uuid.uuid4().hex[:24]}"
+        event_item_done_id = f"event_{uuid.uuid4().hex[:24]}"
+        event_completed_id = f"event_{uuid.uuid4().hex[:24]}"
+
         response_text = await run_perplexity_query(model=model, query=query, system_text=system_text)
 
+        content_part_added_payload = {
+            "event_id": event_part_added_id,
+            "type": "response.content_part.added",
+            "response_id": response_id,
+            "item_id": message_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {
+                "type": "output_text",
+                "text": "",
+                "annotations": [],
+            },
+        }
+        logging.debug("Responses websocket sending content_part.added")
+        await websocket.send_json(content_part_added_payload)
+
         delta_payload = {
+            "event_id": event_text_delta_id,
             "type": "response.output_text.delta",
             "response_id": response_id,
+            "item_id": message_id,
+            "output_index": 0,
+            "content_index": 0,
             "delta": response_text,
         }
         logging.debug("Responses websocket sending output_text.delta")
         await websocket.send_json(delta_payload)
 
         done_payload = {
+            "event_id": event_text_done_id,
             "type": "response.output_text.done",
             "response_id": response_id,
+            "item_id": message_id,
+            "output_index": 0,
+            "content_index": 0,
             "text": response_text,
         }
         logging.debug("Responses websocket sending output_text.done")
         await websocket.send_json(done_payload)
 
+        content_part_done_payload = {
+            "event_id": event_part_done_id,
+            "type": "response.content_part.done",
+            "response_id": response_id,
+            "item_id": message_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {
+                "type": "output_text",
+                "text": response_text,
+                "annotations": [],
+            },
+        }
+        logging.debug("Responses websocket sending content_part.done")
+        await websocket.send_json(content_part_done_payload)
+
+        output_item = {
+            "id": message_id,
+            "object": "realtime.item",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": response_text,
+                    "annotations": [],
+                }
+            ],
+        }
+
+        output_item_done_payload = {
+            "event_id": event_item_done_id,
+            "type": "response.output_item.done",
+            "response_id": response_id,
+            "output_index": 0,
+            "item": output_item,
+        }
+        logging.debug("Responses websocket sending output_item.done")
+        await websocket.send_json(output_item_done_payload)
+
         completed_payload = {
+            "event_id": event_completed_id,
             "type": "response.completed",
             "response": {
                 "id": response_id,
-                "object": "response",
+                "object": "realtime.response",
                 "status": "completed",
+                "status_details": None,
                 "model": model_name,
-                "output": [
-                    {
-                        "type": "message",
-                        "id": message_id,
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": response_text,
-                                "annotations": [],
-                            }
-                        ],
-                    }
-                ],
+                "output": [output_item],
+                "usage": None,
+                "metadata": None,
                 "output_text": response_text,
             },
         }
