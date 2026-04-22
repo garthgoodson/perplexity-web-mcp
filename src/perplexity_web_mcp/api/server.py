@@ -852,6 +852,80 @@ def is_thinking_enabled(
 
 
 
+
+
+
+
+class ClaudeToolPlanningFailure(Exception):
+    """Raised when a tool should be used but no valid tool call could be planned."""
+
+
+def request_looks_actionable_for_tools(user_text: str) -> bool:
+    """Return True when the user is asking for an action that tools should perform."""
+    lowered = user_text.lower()
+    action_markers = (
+        "create a file",
+        "create file",
+        "write a file",
+        "write file",
+        "make a file",
+        "save a file",
+        "save file",
+        "edit",
+        "modify",
+        "update",
+        "delete",
+        "remove",
+        "rename",
+        "move",
+        "patch",
+        "open a pr",
+        "create a pr",
+        "create pull request",
+        "run command",
+        "execute",
+    )
+    return any(marker in lowered for marker in action_markers)
+
+
+def tools_look_actionable(tools: list[dict[str, Any]] | None) -> bool:
+    """Return True if any provided tool appears capable of taking action."""
+    if not tools:
+        return False
+
+    actionable_markers = (
+        "write",
+        "edit",
+        "create",
+        "delete",
+        "rename",
+        "move",
+        "patch",
+        "file",
+        "command",
+        "bash",
+        "shell",
+        "agent",
+        "pr",
+        "pull request",
+    )
+
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        haystack = " ".join(
+            [
+                str(tool.get("name", "")),
+                str(tool.get("description", "")),
+                json.dumps(tool.get("input_schema", {}), ensure_ascii=False),
+            ]
+        ).lower()
+        if any(marker in haystack for marker in actionable_markers):
+            return True
+
+    return False
+
+
 def normalize_tool_name_set(tools: list[dict[str, Any]] | None) -> set[str]:
     """Return the set of valid tool names from the request."""
     valid: set[str] = set()
@@ -902,13 +976,12 @@ def validate_planned_tool_call(
     if not isinstance(plan, dict):
         return None
 
-    if not bool(plan.get("use_tool")):
-        return None
-
     tool_name = str(plan.get("tool_name", "")).strip()
     tool_input = plan.get("input")
 
-    if not tool_name or not isinstance(tool_input, dict):
+    if not tool_name:
+        return None
+    if not isinstance(tool_input, dict):
         return None
 
     valid_tool_names = normalize_tool_name_set(tools)
@@ -924,10 +997,12 @@ async def plan_claude_tool_use(
     system_text: str | None,
     tools: list[dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
-    """Ask Perplexity for a strict JSON decision about whether to call a tool.
+    """Directly extract the best tool call for the user's request.
 
-    Returns a Claude-compatible protocol response if a valid tool call is planned,
-    otherwise returns None and the caller should fall back to normal text response.
+    Returns a Claude-compatible protocol response if a valid tool call is planned.
+    Returns None when no valid tool call can be extracted.
+    Raises ClaudeToolPlanningFailure in strict actionable mode if a tool call was
+    expected but could not be extracted.
     """
     if not tools:
         return None
@@ -959,32 +1034,55 @@ async def plan_claude_tool_use(
     if not tool_descriptions:
         return None
 
-    planning_prompt = (
-        "You are deciding whether the assistant should call one of the available tools.\n\n"
-        "Return ONLY valid JSON with no markdown fences and no extra text.\n"
-        "Use exactly one of these shapes:\n"
-        '{"use_tool": true, "tool_name": "TOOL_NAME", "input": {...}}\n'
-        '{"use_tool": false, "assistant_response": "text"}\n\n'
+    must_use_tool = (
+        request_looks_actionable_for_tools(user_text)
+        and tools_look_actionable(tools)
+    )
+
+    extraction_prompt = (
+        "Your job is to extract the single best tool call for the user's request.\n\n"
+        "Return ONLY valid JSON. No markdown. No prose. No explanation.\n"
+        "Return exactly this shape:\n"
+        '{"tool_name": "TOOL_NAME", "input": {...}}\n\n'
         "Rules:\n"
-        "- Set use_tool=true only if a tool is clearly needed to help with the user's request.\n"
+        "- Choose exactly one tool if any available tool can help perform the user's request.\n"
         "- tool_name must exactly match one of the provided tool names.\n"
-        "- input must be a JSON object matching the selected tool as closely as possible.\n"
-        "- If uncertain, respond with use_tool=false.\n"
-        "- Do not invent tool names.\n"
-        "- Do not include explanations outside the JSON.\n\n"
-        f"Available tools:\n" + "\n".join(tool_descriptions) + "\n\n"
-        f"Latest user request:\n{user_text}"
+        "- input must be a JSON object.\n"
+        "- Preserve exact filenames, paths, and requested contents from the user request whenever possible.\n"
+        '- If no available tool can help, return {"tool_name": "", "input": {}}\n'
+        "- Do not return any text outside the JSON.\n\n"
+    )
+
+    if must_use_tool:
+        extraction_prompt += (
+            "This user request is an actionable workspace or file operation, and available tools appear capable of acting. "
+            "You should therefore choose the best matching tool rather than returning an empty tool_name.\n\n"
+        )
+
+    extraction_prompt += (
+        "Available tools:\n" + "\n".join(tool_descriptions) + "\n\n"
+        f"User request:\n{user_text}"
     )
 
     planning_text = await run_perplexity_query(
         model=get_model(model_name),
-        query=planning_prompt,
-        system_text=system_text,
+        query=extraction_prompt,
+        system_text=None,
     )
+    logging.debug("Claude planning raw output: %s", planning_text)
 
     plan = extract_json_object(planning_text)
+    logging.debug(
+        "Claude planning parsed object: %s",
+        json.dumps(plan, default=str) if plan is not None else "None",
+    )
+
     validated = validate_planned_tool_call(plan, tools)
     if validated is None:
+        if must_use_tool:
+            raise ClaudeToolPlanningFailure(
+                "A tool action was required, but no valid tool call could be extracted from the available tools."
+            )
         return None
 
     tool_name, tool_input = validated
@@ -1026,183 +1124,6 @@ async def plan_claude_tool_use(
     )
 
 
-def estimate_tokens(text: str) -> int:
-    """Rough token estimate."""
-    return len(text) // 4
-
-
-def format_citations(search_results: list) -> str:
-    """Format search results as citations to append to response."""
-    if not search_results:
-        return ""
-
-    citations = ["\n\nCitations:"]
-    for i, result in enumerate(search_results, 1):
-        url = getattr(result, "url", "") or ""
-        if url:
-            citations.append(f"\n[{i}]: {url}")
-
-    return "".join(citations) if len(citations) > 1 else ""
-
-def extract_last_user_text(messages: list[MessageParam]) -> str:
-    """Extract the most recent user text message."""
-    for msg in reversed(messages):
-        if msg.role == "user":
-            text = msg.get_text().strip()
-            if text:
-                return text
-    return ""
-
-
-def extract_tool_results(messages: list[MessageParam]) -> list[claude_protocol.ToolResult]:
-    """Extract Claude-style tool_result blocks from incoming messages."""
-    results: list[claude_protocol.ToolResult] = []
-    for msg in messages:
-        if msg.role != "user":
-            continue
-        if isinstance(msg.content, list):
-            results.extend(claude_protocol.extract_tool_results_from_message_content(msg.content))
-    return results
-
-
-async def cleanup_expired_pending_state() -> None:
-    """Remove expired pending tool calls and approvals."""
-    now = time.time()
-    expired_tool_ids: list[str] = []
-    expired_approval_ids: list[str] = []
-
-    async with pending_state_lock:
-        for tool_use_id, pending in pending_tool_calls.items():
-            if now - pending.created_at > PENDING_TOOL_TTL_SECONDS:
-                expired_tool_ids.append(tool_use_id)
-
-        for approval_request_id, approval in pending_approvals.items():
-            if now - approval.created_at > PENDING_TOOL_TTL_SECONDS:
-                expired_approval_ids.append(approval_request_id)
-
-        for tool_use_id in expired_tool_ids:
-            pending = pending_tool_calls.pop(tool_use_id, None)
-            if pending and pending.approval_request_id:
-                pending_approvals.pop(pending.approval_request_id, None)
-
-        for approval_request_id in expired_approval_ids:
-            approval = pending_approvals.pop(approval_request_id, None)
-            if approval:
-                pending_tool_calls.pop(approval.tool_use_id, None)
-
-    if expired_tool_ids or expired_approval_ids:
-        logging.debug(
-            "Expired pending state cleanup: expired_tools=%s expired_approvals=%s",
-            expired_tool_ids,
-            expired_approval_ids,
-        )
-
-
-async def register_pending_tool_call(
-    model_name: str,
-    tool_name: str,
-    tool_input: dict[str, Any],
-    original_user_text: str,
-    requires_approval: bool,
-    approval_reason: str = "",
-) -> tuple[str, str | None]:
-    """Register a pending tool call and optional approval request."""
-    await cleanup_expired_pending_state()
-
-    tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
-    approval_request_id = f"apr_{uuid.uuid4().hex[:24]}" if requires_approval else None
-
-    async with pending_state_lock:
-        pending_tool_calls[tool_use_id] = PendingToolCall(
-            tool_use_id=tool_use_id,
-            model_name=model_name,
-            tool_name=tool_name,
-            tool_input=tool_input,
-            original_user_text=original_user_text,
-            approved=not requires_approval,
-            approval_request_id=approval_request_id,
-        )
-        if approval_request_id:
-            pending_approvals[approval_request_id] = PendingApproval(
-                approval_request_id=approval_request_id,
-                tool_use_id=tool_use_id,
-                tool_name=tool_name,
-                reason=approval_reason,
-            )
-
-    logging.debug(
-        "Registered pending tool call: tool_use_id=%s tool_name=%s approval_required=%s approval_request_id=%s",
-        tool_use_id,
-        tool_name,
-        requires_approval,
-        approval_request_id,
-    )
-
-    return tool_use_id, approval_request_id
-
-
-async def get_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
-    """Look up a pending tool call."""
-    await cleanup_expired_pending_state()
-    async with pending_state_lock:
-        return pending_tool_calls.get(tool_use_id)
-
-
-async def approve_pending_tool_call(approval_request_id: str, approve: bool) -> PendingToolCall | None:
-    """Approve or reject a pending tool call."""
-    await cleanup_expired_pending_state()
-    async with pending_state_lock:
-        approval = pending_approvals.get(approval_request_id)
-        if not approval:
-            logging.debug(
-                "Approval request not found: approval_request_id=%s approve=%s",
-                approval_request_id,
-                approve,
-            )
-            return None
-
-        pending = pending_tool_calls.get(approval.tool_use_id)
-        if not pending:
-            pending_approvals.pop(approval_request_id, None)
-            logging.debug(
-                "Approval request had no pending tool call: approval_request_id=%s tool_use_id=%s",
-                approval_request_id,
-                approval.tool_use_id,
-            )
-            return None
-
-        if approve:
-            pending.approved = True
-        else:
-            pending_tool_calls.pop(pending.tool_use_id, None)
-
-        pending_approvals.pop(approval_request_id, None)
-        logging.debug(
-            "Approval processed: approval_request_id=%s approve=%s tool_use_id=%s tool_name=%s",
-            approval_request_id,
-            approve,
-            pending.tool_use_id,
-            pending.tool_name,
-        )
-        return pending
-
-
-async def pop_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
-    """Remove and return a pending tool call."""
-    await cleanup_expired_pending_state()
-    async with pending_state_lock:
-        pending = pending_tool_calls.pop(tool_use_id, None)
-        if pending and pending.approval_request_id:
-            pending_approvals.pop(pending.approval_request_id, None)
-
-    logging.debug(
-        "Popped pending tool call: tool_use_id=%s found=%s",
-        tool_use_id,
-        pending is not None,
-    )
-    return pending
-
-
 async def maybe_build_claude_protocol_response(
     model_name: str,
     messages: list[MessageParam],
@@ -1226,12 +1147,37 @@ async def maybe_build_claude_protocol_response(
     if protocol_output is not None:
         return protocol_output
 
-    planned_output = await plan_claude_tool_use(
-        model_name=model_name,
-        messages=messages,
-        system_text=system_text,
-        tools=tools,
-    )
+    try:
+        planned_output = await plan_claude_tool_use(
+            model_name=model_name,
+            messages=messages,
+            system_text=system_text,
+            tools=tools,
+        )
+    except ClaudeToolPlanningFailure as e:
+        return {
+            "id": f"msg_{uuid.uuid4().hex[:24]}",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "I was asked to perform a file or workspace action, but I could not produce "
+                        "a valid tool call for the available tools, so I did not execute anything. "
+                        f"Planning failure: {e}"
+                    ),
+                }
+            ],
+            "model": model_name,
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+            },
+        }
+
     if planned_output is None:
         return None
 
