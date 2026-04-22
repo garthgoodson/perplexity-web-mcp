@@ -1137,7 +1137,44 @@ async def maybe_build_claude_protocol_response(
     2. Try validated structured planning for a fresh tool call.
     3. Fall back to normal Claude text response.
     """
-    input_tokens = estimate_tokens(extract_last_user_text(messages) or "")
+    latest_text = ""
+    for msg in reversed(messages):
+        role = getattr(msg, "role", None)
+        content = getattr(msg, "content", None)
+
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            content = msg.get("content")
+
+        if role != "user":
+            continue
+
+        if isinstance(content, str):
+            candidate = content.strip()
+            if candidate:
+                latest_text = candidate
+                break
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                block_type = getattr(block, "type", None)
+                text_value = getattr(block, "text", None)
+
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    text_value = block.get("text")
+
+                if block_type == "text":
+                    candidate = str(text_value or "").strip()
+                    if candidate:
+                        parts.append(candidate)
+
+            if parts:
+                latest_text = "\n".join(parts)
+                break
+
+    input_tokens = len(latest_text) // 4
     protocol_output = await maybe_build_tool_protocol_response(
         request_model=model_name,
         messages=messages,
@@ -1223,7 +1260,22 @@ async def maybe_build_tool_protocol_response(
         return None
 
     response_id = f"msg_{uuid.uuid4().hex[:24]}"
-    tool_results = extract_tool_results(messages)
+    tool_results: list[claude_protocol.ToolResult] = []
+    for msg in messages:
+        role = getattr(msg, "role", None)
+        content = getattr(msg, "content", None)
+
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            content = msg.get("content")
+
+        if role != "user":
+            continue
+
+        if isinstance(content, list):
+            tool_results.extend(
+                claude_protocol.extract_tool_results_from_message_content(content)
+            )
     if not tool_results:
         return None
 
@@ -1585,6 +1637,158 @@ async def run_perplexity_query(
             return answer + citations
         finally:
             fresh_client.close()
+
+
+\ndef estimate_tokens(text: str) -> int:
+    """Rough token estimate."""
+    return len(text) // 4
+
+
+def extract_last_user_text(messages) -> str:
+    """Extract the most recent user text message from MessageParam or dict messages."""
+    for msg in reversed(messages):
+        role = getattr(msg, "role", None)
+        content = getattr(msg, "content", None)
+
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            content = msg.get("content")
+
+        if role != "user":
+            continue
+
+        if isinstance(content, str):
+            text = content.strip()
+            if text:
+                return text
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                block_type = getattr(block, "type", None)
+                text_value = getattr(block, "text", None)
+
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    text_value = block.get("text")
+
+                if block_type == "text":
+                    candidate = str(text_value or "").strip()
+                    if candidate:
+                        parts.append(candidate)
+
+            if parts:
+                return "\n".join(parts)
+
+    return ""
+
+
+async def cleanup_expired_pending_state() -> None:
+    """Remove expired pending tool calls and approvals."""
+    now = time.time()
+    expired_tool_ids: list[str] = []
+    expired_approval_ids: list[str] = []
+
+    async with pending_state_lock:
+        for tool_use_id, pending in pending_tool_calls.items():
+            if now - pending.created_at > PENDING_TOOL_TTL_SECONDS:
+                expired_tool_ids.append(tool_use_id)
+
+        for approval_request_id, approval in pending_approvals.items():
+            if now - approval.created_at > PENDING_TOOL_TTL_SECONDS:
+                expired_approval_ids.append(approval_request_id)
+
+        for tool_use_id in expired_tool_ids:
+            pending = pending_tool_calls.pop(tool_use_id, None)
+            if pending and pending.approval_request_id:
+                pending_approvals.pop(pending.approval_request_id, None)
+
+        for approval_request_id in expired_approval_ids:
+            approval = pending_approvals.pop(approval_request_id, None)
+            if approval:
+                pending_tool_calls.pop(approval.tool_use_id, None)
+
+
+async def register_pending_tool_call(
+    model_name: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    original_user_text: str,
+    requires_approval: bool,
+    approval_reason: str = "",
+) -> tuple[str, str | None]:
+    """Register a pending tool call and optional approval request."""
+    await cleanup_expired_pending_state()
+
+    tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
+    approval_request_id = f"apr_{uuid.uuid4().hex[:24]}" if requires_approval else None
+
+    async with pending_state_lock:
+        pending_tool_calls[tool_use_id] = PendingToolCall(
+            tool_use_id=tool_use_id,
+            model_name=model_name,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            original_user_text=original_user_text,
+            approved=not requires_approval,
+            approval_request_id=approval_request_id,
+        )
+        if approval_request_id:
+            pending_approvals[approval_request_id] = PendingApproval(
+                approval_request_id=approval_request_id,
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                reason=approval_reason,
+            )
+
+    logging.debug(
+        "Registered pending tool call: tool_use_id=%s tool_name=%s approval_required=%s approval_request_id=%s",
+        tool_use_id,
+        tool_name,
+        requires_approval,
+        approval_request_id,
+    )
+
+    return tool_use_id, approval_request_id
+
+
+async def get_pending_tool_call(tool_use_id: str):
+    """Look up a pending tool call."""
+    await cleanup_expired_pending_state()
+    async with pending_state_lock:
+        return pending_tool_calls.get(tool_use_id)
+
+
+async def approve_pending_tool_call(approval_request_id: str, approve: bool):
+    """Approve or reject a pending tool call."""
+    await cleanup_expired_pending_state()
+    async with pending_state_lock:
+        approval = pending_approvals.get(approval_request_id)
+        if not approval:
+            return None
+
+        pending = pending_tool_calls.get(approval.tool_use_id)
+        if not pending:
+            pending_approvals.pop(approval_request_id, None)
+            return None
+
+        if approve:
+            pending.approved = True
+        else:
+            pending_tool_calls.pop(pending.tool_use_id, None)
+
+        pending_approvals.pop(approval_request_id, None)
+        return pending
+
+
+async def pop_pending_tool_call(tool_use_id: str):
+    """Remove and return a pending tool call."""
+    await cleanup_expired_pending_state()
+    async with pending_state_lock:
+        pending = pending_tool_calls.pop(tool_use_id, None)
+        if pending and pending.approval_request_id:
+            pending_approvals.pop(pending.approval_request_id, None)
+        return pending
 
 
 # =============================================================================
