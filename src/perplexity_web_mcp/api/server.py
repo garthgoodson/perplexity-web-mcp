@@ -634,6 +634,39 @@ def openai_messages_to_query(messages: list[OpenAIChatMessage]) -> str:
     return "\n\n".join(parts)
 
 
+def claude_input_to_query(messages: list[dict[str, Any]]) -> str:
+    """Extract the latest meaningful user text from Claude messages."""
+    latest_user_text = ""
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role", "")).strip().lower() != "user":
+            continue
+
+        content = message.get("content", "")
+        if isinstance(content, str):
+            candidate = content.strip()
+            if candidate:
+                latest_user_text = candidate
+            continue
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
+                    part = str(block.get("text", "")).strip()
+                    if part:
+                        parts.append(part)
+            candidate = "\n".join(parts).strip()
+            if candidate:
+                latest_user_text = candidate
+
+    return latest_user_text
+
+
 def responses_input_to_query(value: str | list[dict[str, Any]]) -> str:
     """Convert OpenAI Responses API input to a Perplexity query."""
     if isinstance(value, str):
@@ -934,6 +967,28 @@ async def pop_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
     )
     return pending
 
+
+async def maybe_build_claude_protocol_response(
+    model_name: str,
+    messages: list[MessageParam],
+    system_text: str | None,
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Claude-specific wrapper around the shared tool protocol helper.
+
+    Keep the original message objects intact so downstream helpers that expect
+    attribute access like ``msg.role`` continue to work. We intentionally do
+    not inject ``system_text`` here as a raw dict message, because that breaks
+    the shared tool protocol path. This preserves the Codex/Responses path,
+    which does not use this wrapper at all.
+    """
+    input_tokens = estimate_tokens(claude_input_to_query(messages))
+    return await maybe_build_tool_protocol_response(
+        request_model=model_name,
+        messages=messages,
+        tools=tools,
+        input_tokens=input_tokens,
+    )
 
 async def maybe_build_tool_protocol_response(
     request_model: str,
