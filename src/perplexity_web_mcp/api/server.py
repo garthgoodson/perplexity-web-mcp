@@ -1485,6 +1485,7 @@ async def list_models(request: Request):
 
 @app.post("/v1/messages")
 async def create_message(body: MessagesRequest, request: Request):
+    logger = logging.getLogger(__name__)
     anthropic_version = request.headers.get("anthropic-version", "")
     query = claude_input_to_query(body.messages)
     input_value = getattr(body, "input", None)
@@ -1506,6 +1507,7 @@ async def create_message(body: MessagesRequest, request: Request):
         tools=body_tools,
     )
     if protocol_output is not None:
+        logger.debug("Claude protocol output: %s", json.dumps(protocol_output, default=str))
         if body.stream:
             return StreamingResponse(
                 claude_stream_protocol_response(protocol_output),
@@ -1540,6 +1542,7 @@ async def create_message(body: MessagesRequest, request: Request):
         },
     }
 
+    logger.debug("Claude response: %s", json.dumps(response, default=str))
     if body.stream:
         return StreamingResponse(
             claude_stream_text_response(response, response_text),
@@ -2491,6 +2494,51 @@ def claude_stream_protocol_response(protocol_output: dict[str, Any]):
             "stop_sequence": protocol_output.get("stop_sequence"),
         },
         "usage": usage,
+    }
+    yield f"event: message_delta\ndata: {json.dumps(message_delta)}\n\n"
+    yield "event: message_stop\ndata: {}\n\n"
+
+def claude_stream_text_response(response: dict[str, Any], response_text: str):
+    """Stream a plain Claude text response as Anthropic SSE events."""
+    import json
+
+    message_start = {
+        "type": "message_start",
+        "message": {
+            "id": response.get("id", f"msg_{uuid.uuid4().hex[:24]}"),
+            "type": "message",
+            "role": "assistant",
+            "model": response.get("model", "claude-compatible"),
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": response.get("usage", {"input_tokens": 0, "output_tokens": 0}),
+        },
+    }
+    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+
+    content_block = {"type": "text", "text": ""}
+    yield f"event: content_block_start\ndata: {json.dumps({'index': 0, 'content_block': content_block})}\n\n"
+
+    if response_text:
+        delta = {
+            "index": 0,
+            "delta": {
+                "type": "text_delta",
+                "text": response_text,
+            },
+        }
+        yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+
+    yield f"event: content_block_stop\ndata: {json.dumps({'index': 0})}\n\n"
+
+    message_delta = {
+        "type": "message_delta",
+        "delta": {
+            "stop_reason": response.get("stop_reason", "end_turn"),
+            "stop_sequence": response.get("stop_sequence"),
+        },
+        "usage": response.get("usage", {"input_tokens": 0, "output_tokens": 0}),
     }
     yield f"event: message_delta\ndata: {json.dumps(message_delta)}\n\n"
     yield "event: message_stop\ndata: {}\n\n"
