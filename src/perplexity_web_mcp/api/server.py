@@ -1429,120 +1429,68 @@ async def list_models(request: Request):
 
 
 @app.post("/v1/messages")
-async def create_message(request: Request, body: MessagesRequest):
-    """Create a message (Anthropic Messages API)."""
-    verify_auth(request)
-    check_anthropic_version(request)
-
-    if body.model and "haiku" in body.model.lower():
-        response_id = f"msg_{uuid.uuid4().hex[:24]}"
-        user_msg = ""
-        for msg in body.messages:
-            if msg.role == "user":
-                user_msg = msg.get_text()[:50]
-        mock_response = f"Response to: {user_msg}" if user_msg else "OK"
-
-        if body.stream:
-
-            async def mock_stream():
-                yield (
-                    f"event: message_start\ndata: "
-                    f"{json.dumps({'type': 'message_start', 'message': {'id': response_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': body.model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 10, 'output_tokens': 0}}})}\n\n"
-                )
-                yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
-                yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': mock_response}})}\n\n"
-                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-                yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': len(mock_response.split())}})}\n\n"
-                yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
-
-            logging.info(f"Mock response for internal model: {body.model}")
-            return StreamingResponse(mock_stream(), media_type="text/event-stream")
-
-        logging.info(f"Mock response for internal model: {body.model}")
-        return MessagesResponse(
-            id=response_id,
-            type="message",
-            role="assistant",
-            content=[{"type": "text", "text": mock_response}],
-            model=body.model,
-            stop_reason="end_turn",
-            usage=Usage(input_tokens=10, output_tokens=len(mock_response.split())),
-        )
-
-    if not body.messages:
-        raise HTTPException(
-            status_code=400,
-            detail={"type": "invalid_request_error", "message": "messages is required"},
-        )
-    thinking_enabled = body.thinking is not None and body.thinking.get("type") == "enabled"
-    model = get_model(body.model, thinking=thinking_enabled)
-
+async def create_message(body: MessagesRequest, request: Request):
+    anthropic_version = request.headers.get("anthropic-version", "")
+    query = claude_input_to_query(body.messages)
     input_value = getattr(body, "input", None)
     system_text = (
         getattr(body, "system", None)
         or getattr(body, "instructions", None)
         or (responses_input_to_instructions(input_value) if input_value is not None else None)
-    )    
-    thinking_enabled = is_thinking_enabled(reasoning=body.reasoning)
+    )
+    thinking_enabled = is_thinking_enabled(reasoning=getattr(body, "reasoning", None))
     model = get_model(body.model, thinking=thinking_enabled)
 
-    response_id = f"resp_{uuid.uuid4().hex[:24]}"
-    created = int(time.time())
-    input_tokens = estimate_tokens(query)
-
-    logging.info(
-        f"OpenAI Responses Request: model={body.model}, thinking={thinking_enabled}, "
-        f"stream={body.stream}, tools={len(body.tools or [])}"
-    )
-
-    protocol_output = await maybe_build_responses_protocol_output(
+    # Claude-native tools should exist on MessagesRequest, but guard anyway so this
+    # path can tolerate mixed payloads during compatibility work.
+    body_tools = getattr(body, "tools", None)
+    protocol_output = await maybe_build_claude_protocol_response(
         model_name=body.model,
-        user_input=query,
-        tools=body.tools,
-        raw_input=body.input,
+        messages=body.messages,
+        system_text=system_text,
+        tools=body_tools,
     )
     if protocol_output is not None:
-        logging.debug(
-            "Responses protocol output: status=%s output_types=%s",
-            protocol_output.get("status"),
-            [item.get("type") for item in protocol_output.get("output", [])],
-        )
-        return protocol_output
+        if body.stream:
+            return StreamingResponse(
+                claude_stream_protocol_response(protocol_output),
+                media_type="text/event-stream",
+            )
+        return JSONResponse(content=protocol_output)
 
-    if body.stream:        
+    logger.info(
+        "Anthropic Request: model=%s, thinking=%s, stream=%s",
+        body.model,
+        thinking_enabled,
+        body.stream,
+    )
+
+    response_text = await run_perplexity_query(
+        model=model,
+        query=query,
+        system_text=system_text,
+    )
+
+    response = {
+        "id": f"msg_{uuid.uuid4().hex[:24]}",
+        "type": "message",
+        "role": "assistant",
+        "model": body.model,
+        "content": [{"type": "text", "text": response_text}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": estimate_tokens(query if isinstance(query, str) else str(query)),
+            "output_tokens": estimate_tokens(response_text),
+        },
+    }
+
+    if body.stream:
         return StreamingResponse(
-            stream_response(response_id, body.model, model, query, input_tokens, system_text),
+            claude_stream_text_response(response, response_text),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
         )
-
-    try:
-        full_response = await run_perplexity_query(model=model, query=query, system_text=system_text)
-
-        return {
-            "id": response_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": full_response}],
-            "model": body.model,
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": estimate_tokens(full_response),
-            },
-        }
-
-    except Exception as e:
-        logging.error(f"Error creating message: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={"type": "api_error", "message": str(e)},
-        )
+    return JSONResponse(content=response)
 
 async def stream_response(
     response_id: str,
