@@ -1639,7 +1639,7 @@ async def run_perplexity_query(
             fresh_client.close()
 
 
-\ndef estimate_tokens(text: str) -> int:
+def estimate_tokens(text: str) -> int:
     """Rough token estimate."""
     return len(text) // 4
 
