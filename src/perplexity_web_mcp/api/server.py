@@ -1065,130 +1065,84 @@ async def maybe_build_tool_protocol_response(
     tools: list[dict[str, Any]] | None,
     input_tokens: int,
 ) -> dict[str, Any] | None:
-    """Return a Claude tool_use response when protocol handling should take over."""
+    """Handle Claude protocol continuation for tool_result messages only.
+
+    Important: this function intentionally does NOT synthesize fresh tool_use
+    calls from heuristics like write/edit keywords. That behavior was causing
+    malformed Claude tool calls and breaking normal text replies. We only
+    continue already-issued tool calls when the client sends back tool_result
+    blocks. Fresh tool planning should be implemented separately using validated
+    structured planning.
+    """
     normalized_tools = claude_protocol.extract_tool_definitions(tools)
     if not normalized_tools:
         return None
 
     response_id = f"msg_{uuid.uuid4().hex[:24]}"
     tool_results = extract_tool_results(messages)
-    if tool_results:
-        rendered_responses: list[str] = []
-
-        for result in tool_results:
-            pending = await get_pending_tool_call(result.tool_use_id)
-            if pending is None:
-                rendered_responses.append(
-                    f"Received tool result for unknown or expired tool call {result.tool_use_id}."
-                )
-                continue
-
-            if not pending.approved:
-                rendered_responses.append(
-                    f"Received tool result for unapproved tool call {result.tool_use_id}."
-                )
-                continue
-
-            popped = await pop_pending_tool_call(result.tool_use_id)
-            if popped is None:
-                rendered_responses.append(
-                    f"Tool call {result.tool_use_id} was no longer available."
-                )
-                continue
-
-            continuation_prompt = (
-                f"Original user request:\n{popped.original_user_text}\n\n"
-                f"Tool executed: {popped.tool_name}\n"
-                f"Tool status: {'error' if result.is_error else 'success'}\n\n"
-                f"Tool output:\n{result.content}\n\n"
-                "Please continue by responding to the user with the next helpful assistant message. "
-                "If the tool output indicates success, summarize what was done and any relevant next steps. "
-                "If the tool output indicates an error, explain the failure and suggest how to fix it."
-            )
-
-            try:
-                continued_response = await run_perplexity_query(
-                    model=get_model(request_model),
-                    query=continuation_prompt,
-                    system_text=None,
-                )
-            except Exception as e:
-                continued_response = (
-                    f"Tool {popped.tool_name} completed, but continuation generation failed: {e}"
-                )
-
-            rendered_responses.append(continued_response)
-
-        summary_text = "\n\n".join(rendered_responses)
-        return {
-            "id": response_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": summary_text}],
-            "model": request_model,
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": estimate_tokens(summary_text),
-            },
-        }
-
-    user_text = extract_last_user_text(messages).lower()
-    write_markers = (
-        "write",
-        "edit",
-        "modify",
-        "update",
-        "create file",
-        "save",
-        "delete",
-        "rename",
-        "move file",
-        "replace",
-        "patch",
-    )
-    if not any(marker in user_text for marker in write_markers):
+    if not tool_results:
         return None
 
-    selected_tool = normalized_tools[0]
-    original_user_text = extract_last_user_text(messages)
-    tool_input = {"query": original_user_text}
+    rendered_responses: list[str] = []
 
-    approval_required = claude_protocol.requires_approval(selected_tool.name)
-    tool_use_id, approval_request_id = await register_pending_tool_call(
-        model_name=request_model,
-        tool_name=selected_tool.name,
-        tool_input=tool_input,
-        original_user_text=original_user_text,
-        requires_approval=approval_required,
-        approval_reason="This tool appears to modify files or workspace state.",
-    )
+    for result in tool_results:
+        pending = await get_pending_tool_call(result.tool_use_id)
+        if pending is None:
+            rendered_responses.append(
+                f"Received tool result for unknown or expired tool call {result.tool_use_id}."
+            )
+            continue
 
-    if approval_required and approval_request_id is not None:
-        approval_payload = claude_protocol.build_openai_mcp_approval_request(
-            selected_tool.name,
-            tool_input,
-            reason="This tool appears to modify files or workspace state.",
+        if not pending.approved:
+            rendered_responses.append(
+                f"Received tool result for unapproved tool call {result.tool_use_id}."
+            )
+            continue
+
+        popped = await pop_pending_tool_call(result.tool_use_id)
+        if popped is None:
+            rendered_responses.append(
+                f"Tool call {result.tool_use_id} was no longer available."
+            )
+            continue
+
+        continuation_prompt = (
+            f"Original user request:\n{popped.original_user_text}\n\n"
+            f"Tool executed: {popped.tool_name}\n"
+            f"Tool status: {'error' if result.is_error else 'success'}\n\n"
+            f"Tool output:\n{result.content}\n\n"
+            "Please continue by responding to the user with the next helpful assistant message. "
+            "If the tool output indicates success, summarize what was done and any relevant next steps. "
+            "If the tool output indicates an error, explain the failure and suggest how to fix it."
         )
-        approval_payload["approval_request_id"] = approval_request_id
-        tool_input = {
-            **tool_input,
-            "_approval": approval_payload,
-        }
 
-    tool_block = claude_protocol.build_tool_use_block(
-        name=selected_tool.name,
-        tool_input=tool_input,
-        tool_use_id=tool_use_id,
-    )
-    return claude_protocol.tool_use_stop_response(
-        message_id=response_id,
-        model=request_model,
-        content=[tool_block],
-        input_tokens=input_tokens,
-        output_tokens=estimate_tokens(selected_tool.name),
-    )
+        try:
+            continued_response = await run_perplexity_query(
+                model=get_model(request_model),
+                query=continuation_prompt,
+                system_text=None,
+            )
+        except Exception as e:
+            continued_response = (
+                f"Tool {popped.tool_name} completed, but continuation generation failed: {e}"
+            )
+
+        rendered_responses.append(continued_response)
+
+    summary_text = "\n\n".join(rendered_responses)
+    return {
+        "id": response_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": summary_text}],
+        "model": request_model,
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": estimate_tokens(summary_text),
+        },
+    }
 
 
 def extract_openai_approval_response(input_value: str | list[dict[str, Any]]) -> tuple[str, bool] | None:
