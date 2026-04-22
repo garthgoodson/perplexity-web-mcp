@@ -493,6 +493,7 @@ MIN_REQUEST_INTERVAL: float = 5.0
 pending_tool_calls: dict[str, "PendingToolCall"] = {}
 pending_approvals: dict[str, "PendingApproval"] = {}
 pending_state_lock = asyncio.Lock()
+PENDING_TOOL_TTL_SECONDS: float = 1800.0
 
 
 @dataclass
@@ -705,6 +706,44 @@ def responses_input_to_instructions(value: str | list[dict[str, Any]]) -> str | 
     return "\n".join(instructions).strip() or None
 
 
+def extract_latest_user_text_from_responses_input(value: str | list[dict[str, Any]]) -> str:
+    """Extract the latest meaningful user text from Responses API structured input."""
+    if isinstance(value, str):
+        return value.strip()
+
+    latest_user_text = ""
+
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        role = str(item.get("role", "")).strip().lower()
+        if role != "user":
+            continue
+
+        content = item.get("content", "")
+        if isinstance(content, str):
+            candidate = content.strip()
+            if candidate:
+                latest_user_text = candidate
+            continue
+
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in ("input_text", "text", "output_text"):
+                    part = str(block.get("text", "")).strip()
+                    if part:
+                        text_parts.append(part)
+            candidate = "\n".join(text_parts).strip()
+            if candidate:
+                latest_user_text = candidate
+
+    return latest_user_text
+
+
 def is_thinking_enabled(
     reasoning_effort: str | None = None,
     reasoning: dict[str, Any] | None = None,
@@ -758,6 +797,39 @@ def extract_tool_results(messages: list[MessageParam]) -> list[claude_protocol.T
     return results
 
 
+async def cleanup_expired_pending_state() -> None:
+    """Remove expired pending tool calls and approvals."""
+    now = time.time()
+    expired_tool_ids: list[str] = []
+    expired_approval_ids: list[str] = []
+
+    async with pending_state_lock:
+        for tool_use_id, pending in pending_tool_calls.items():
+            if now - pending.created_at > PENDING_TOOL_TTL_SECONDS:
+                expired_tool_ids.append(tool_use_id)
+
+        for approval_request_id, approval in pending_approvals.items():
+            if now - approval.created_at > PENDING_TOOL_TTL_SECONDS:
+                expired_approval_ids.append(approval_request_id)
+
+        for tool_use_id in expired_tool_ids:
+            pending = pending_tool_calls.pop(tool_use_id, None)
+            if pending and pending.approval_request_id:
+                pending_approvals.pop(pending.approval_request_id, None)
+
+        for approval_request_id in expired_approval_ids:
+            approval = pending_approvals.pop(approval_request_id, None)
+            if approval:
+                pending_tool_calls.pop(approval.tool_use_id, None)
+
+    if expired_tool_ids or expired_approval_ids:
+        logging.debug(
+            "Expired pending state cleanup: expired_tools=%s expired_approvals=%s",
+            expired_tool_ids,
+            expired_approval_ids,
+        )
+
+
 async def register_pending_tool_call(
     model_name: str,
     tool_name: str,
@@ -767,6 +839,8 @@ async def register_pending_tool_call(
     approval_reason: str = "",
 ) -> tuple[str, str | None]:
     """Register a pending tool call and optional approval request."""
+    await cleanup_expired_pending_state()
+
     tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
     approval_request_id = f"apr_{uuid.uuid4().hex[:24]}" if requires_approval else None
 
@@ -788,25 +862,45 @@ async def register_pending_tool_call(
                 reason=approval_reason,
             )
 
+    logging.debug(
+        "Registered pending tool call: tool_use_id=%s tool_name=%s approval_required=%s approval_request_id=%s",
+        tool_use_id,
+        tool_name,
+        requires_approval,
+        approval_request_id,
+    )
+
     return tool_use_id, approval_request_id
 
 
 async def get_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
     """Look up a pending tool call."""
+    await cleanup_expired_pending_state()
     async with pending_state_lock:
         return pending_tool_calls.get(tool_use_id)
 
 
 async def approve_pending_tool_call(approval_request_id: str, approve: bool) -> PendingToolCall | None:
     """Approve or reject a pending tool call."""
+    await cleanup_expired_pending_state()
     async with pending_state_lock:
         approval = pending_approvals.get(approval_request_id)
         if not approval:
+            logging.debug(
+                "Approval request not found: approval_request_id=%s approve=%s",
+                approval_request_id,
+                approve,
+            )
             return None
 
         pending = pending_tool_calls.get(approval.tool_use_id)
         if not pending:
             pending_approvals.pop(approval_request_id, None)
+            logging.debug(
+                "Approval request had no pending tool call: approval_request_id=%s tool_use_id=%s",
+                approval_request_id,
+                approval.tool_use_id,
+            )
             return None
 
         if approve:
@@ -815,16 +909,30 @@ async def approve_pending_tool_call(approval_request_id: str, approve: bool) -> 
             pending_tool_calls.pop(pending.tool_use_id, None)
 
         pending_approvals.pop(approval_request_id, None)
+        logging.debug(
+            "Approval processed: approval_request_id=%s approve=%s tool_use_id=%s tool_name=%s",
+            approval_request_id,
+            approve,
+            pending.tool_use_id,
+            pending.tool_name,
+        )
         return pending
 
 
 async def pop_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
     """Remove and return a pending tool call."""
+    await cleanup_expired_pending_state()
     async with pending_state_lock:
         pending = pending_tool_calls.pop(tool_use_id, None)
         if pending and pending.approval_request_id:
             pending_approvals.pop(pending.approval_request_id, None)
-        return pending
+
+    logging.debug(
+        "Popped pending tool call: tool_use_id=%s found=%s",
+        tool_use_id,
+        pending is not None,
+    )
+    return pending
 
 
 async def maybe_build_tool_protocol_response(
@@ -841,18 +949,53 @@ async def maybe_build_tool_protocol_response(
     response_id = f"msg_{uuid.uuid4().hex[:24]}"
     tool_results = extract_tool_results(messages)
     if tool_results:
-        summary_lines: list[str] = []
-        for result in tool_results:
-            pending = await pop_pending_tool_call(result.tool_use_id)
-            status = "error" if result.is_error else "ok"
-            if pending is not None:
-                summary_lines.append(
-                    f"Tool {pending.tool_name} completed for request '{pending.original_user_text}' ({status})."
-                )
-            else:
-                summary_lines.append(f"Tool result received for {result.tool_use_id} ({status}).")
+        rendered_responses: list[str] = []
 
-        summary_text = "\n".join(summary_lines)
+        for result in tool_results:
+            pending = await get_pending_tool_call(result.tool_use_id)
+            if pending is None:
+                rendered_responses.append(
+                    f"Received tool result for unknown or expired tool call {result.tool_use_id}."
+                )
+                continue
+
+            if not pending.approved:
+                rendered_responses.append(
+                    f"Received tool result for unapproved tool call {result.tool_use_id}."
+                )
+                continue
+
+            popped = await pop_pending_tool_call(result.tool_use_id)
+            if popped is None:
+                rendered_responses.append(
+                    f"Tool call {result.tool_use_id} was no longer available."
+                )
+                continue
+
+            continuation_prompt = (
+                f"Original user request:\n{popped.original_user_text}\n\n"
+                f"Tool executed: {popped.tool_name}\n"
+                f"Tool status: {'error' if result.is_error else 'success'}\n\n"
+                f"Tool output:\n{result.content}\n\n"
+                "Please continue by responding to the user with the next helpful assistant message. "
+                "If the tool output indicates success, summarize what was done and any relevant next steps. "
+                "If the tool output indicates an error, explain the failure and suggest how to fix it."
+            )
+
+            try:
+                continued_response = await run_perplexity_query(
+                    model=get_model(request_model),
+                    query=continuation_prompt,
+                    system_text=None,
+                )
+            except Exception as e:
+                continued_response = (
+                    f"Tool {popped.tool_name} completed, but continuation generation failed: {e}"
+                )
+
+            rendered_responses.append(continued_response)
+
+        summary_text = "\n\n".join(rendered_responses)
         return {
             "id": response_id,
             "type": "message",
@@ -1038,14 +1181,35 @@ async def maybe_build_responses_protocol_output(
     tool_result = extract_openai_tool_result(raw_input)
     if tool_result is not None:
         tool_use_id, content, is_error = tool_result
-        pending = await pop_pending_tool_call(tool_use_id)
+        pending = await get_pending_tool_call(tool_use_id)
+
         if pending is None:
-            message = f"Tool result received for unknown tool call {tool_use_id}."
+            message = f"Tool result received for unknown or expired tool call {tool_use_id}."
+        elif not pending.approved:
+            message = f"Tool result received for unapproved tool call {tool_use_id}."
         else:
-            status = "error" if is_error else "ok"
-            message = f"Tool {pending.tool_name} completed for request '{pending.original_user_text}' ({status})."
-            if content:
-                message += f"\n\nTool output:\n{content}"
+            popped = await pop_pending_tool_call(tool_use_id)
+            if popped is None:
+                message = f"Tool call {tool_use_id} was no longer available."
+            else:
+                continuation_prompt = (
+                    f"Original user request:\n{popped.original_user_text}\n\n"
+                    f"Tool executed: {popped.tool_name}\n"
+                    f"Tool status: {'error' if is_error else 'success'}\n\n"
+                    f"Tool output:\n{content}\n\n"
+                    "Please continue by responding to the user with the next helpful assistant message. "
+                    "If the tool output indicates success, summarize what was done and any relevant next steps. "
+                    "If the tool output indicates an error, explain the failure and suggest how to fix it."
+                )
+
+                try:
+                    message = await run_perplexity_query(
+                        model=get_model(model_name),
+                        query=continuation_prompt,
+                        system_text=None,
+                    )
+                except Exception as e:
+                    message = f"Tool {popped.tool_name} completed, but continuation generation failed: {e}"
 
         return {
             "id": f"resp_{uuid.uuid4().hex[:24]}",
@@ -1418,6 +1582,11 @@ async def create_message(request: Request, body: MessagesRequest):
         raw_input=body.input,
     )
     if protocol_output is not None:
+        logging.debug(
+            "Responses protocol output: status=%s output_types=%s",
+            protocol_output.get("status"),
+            [item.get("type") for item in protocol_output.get("output", [])],
+        )
         return protocol_output
 
     if body.stream:        
@@ -1815,7 +1984,17 @@ async def create_response(request: Request, body: OpenAIResponsesRequest):
     """Create a response (minimal OpenAI Responses API compatibility layer)."""
     verify_auth(request)
 
+    logging.debug(
+        "Responses POST received: model=%s stream=%s tools=%s input_type=%s",
+        body.model,
+        body.stream,
+        len(body.tools or []),
+        type(body.input).__name__,
+    )
+
     query = responses_input_to_query(body.input)
+    logging.debug("Responses POST parsed query: %r", query[:500])
+
     if not query:
         raise HTTPException(
             status_code=400,
@@ -1960,55 +2139,130 @@ async def stream_openai_responses_response(
 async def responses_websocket(websocket: WebSocket):
     """Minimal websocket compatibility endpoint for clients probing /v1/responses."""
     await websocket.accept()
+    logging.debug("Responses websocket accepted")
+
     try:
-        await websocket.send_json(
-            {
-                "type": "info",
-                "message": "WebSocket support for /v1/responses is limited. Prefer POST /v1/responses.",
-            }
-        )
+        logging.debug("Responses websocket waiting for payload")
 
         try:
-            payload = await asyncio.wait_for(websocket.receive_json(), timeout=2.0)
+            payload = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+            logging.debug("Responses websocket payload: %s", payload)
         except asyncio.TimeoutError:
+            logging.debug("Responses websocket timeout waiting for payload")
             payload = None
-        except Exception:
+        except Exception as e:
+            logging.debug("Responses websocket receive error: %s", e)
             payload = None
 
         if not payload:
+            logging.debug("Responses websocket no payload; closing")
             await websocket.close(code=1000)
             return
 
+        payload_type = str(payload.get("type", "")).strip()
         model_name = str(payload.get("model", config.default_model))
-        query = responses_input_to_query(payload.get("input", ""))
-        system_text = payload.get("instructions")
+        raw_input = payload.get("input", "")
+        top_level_instructions = payload.get("instructions")
+        structured_instructions = responses_input_to_instructions(raw_input)
+        system_text = top_level_instructions or structured_instructions
+        query = extract_latest_user_text_from_responses_input(raw_input)
         thinking_enabled = is_thinking_enabled(reasoning=payload.get("reasoning"))
         model = get_model(model_name, thinking=thinking_enabled)
 
-        if not query:
-            await websocket.send_json(
-                {"type": "error", "error": {"message": "input is required"}}
-            )
-            await websocket.close(code=1008)
+        logging.debug(
+            "Responses websocket parsed: type=%s model=%s thinking=%s query=%r tools_present=%s",
+            payload_type,
+            model_name,
+            thinking_enabled,
+            query[:500],
+            bool(payload.get("tools")),
+        )
+
+        if payload_type and payload_type != "response.create":
+            error_payload = {
+                "type": "error",
+                "error": {"message": f"Unsupported websocket payload type: {payload_type}"},
+            }
+            logging.debug("Responses websocket unsupported payload type: %s", error_payload)
+            await websocket.send_json(error_payload)
+            await websocket.close(code=1003)
             return
+
+        response_id = f"resp_{uuid.uuid4().hex[:24]}"
+        message_id = f"msg_{uuid.uuid4().hex[:24]}"
+
+        created_payload = {
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "in_progress",
+                "model": model_name,
+            },
+        }
+
+        if not query:
+            logging.debug("Responses websocket no actionable user input; sending created event only")
+            await websocket.send_json(created_payload)
+            logging.debug("Responses websocket closing cleanly")
+            await websocket.close(code=1000)
+            return
+
+        logging.debug("Responses websocket sending created event")
+        await websocket.send_json(created_payload)
 
         response_text = await run_perplexity_query(model=model, query=query, system_text=system_text)
 
-        await websocket.send_json(
-            {
-                "type": "response.completed",
-                "response": {
-                    "id": f"resp_{uuid.uuid4().hex[:24]}",
-                    "object": "response",
-                    "status": "completed",
-                    "model": model_name,
-                    "output_text": response_text,
-                },
-            }
-        )
+        delta_payload = {
+            "type": "response.output_text.delta",
+            "response_id": response_id,
+            "delta": response_text,
+        }
+        logging.debug("Responses websocket sending output_text.delta")
+        await websocket.send_json(delta_payload)
+
+        done_payload = {
+            "type": "response.output_text.done",
+            "response_id": response_id,
+            "text": response_text,
+        }
+        logging.debug("Responses websocket sending output_text.done")
+        await websocket.send_json(done_payload)
+
+        completed_payload = {
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "completed",
+                "model": model_name,
+                "output": [
+                    {
+                        "type": "message",
+                        "id": message_id,
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": response_text,
+                                "annotations": [],
+                            }
+                        ],
+                    }
+                ],
+                "output_text": response_text,
+            },
+        }
+        logging.debug("Responses websocket sending completed event")
+        await websocket.send_json(completed_payload)
+        logging.debug("Responses websocket closing cleanly")
         await websocket.close(code=1000)
     except WebSocketDisconnect:
+        logging.debug("Responses websocket disconnected by client")
         logging.info("Responses websocket disconnected")
+    except Exception:
+        logging.exception("Responses websocket error")
+        raise
 
 
 # =============================================================================
