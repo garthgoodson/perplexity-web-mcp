@@ -38,7 +38,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncGenerator
 
@@ -490,6 +490,32 @@ start_time: datetime
 perplexity_semaphore: asyncio.Semaphore
 last_request_time: float = 0.0
 MIN_REQUEST_INTERVAL: float = 5.0
+pending_tool_calls: dict[str, "PendingToolCall"] = {}
+pending_approvals: dict[str, "PendingApproval"] = {}
+pending_state_lock = asyncio.Lock()
+
+
+@dataclass
+class PendingToolCall:
+    """Pending Claude/OpenAI-compatible tool call awaiting result."""
+    tool_use_id: str
+    model_name: str
+    tool_name: str
+    tool_input: dict[str, Any]
+    original_user_text: str
+    created_at: float = field(default_factory=time.time)
+    approved: bool = False
+    approval_request_id: str | None = None
+
+
+@dataclass
+class PendingApproval:
+    """Approval request tied to a pending tool call."""
+    approval_request_id: str
+    tool_use_id: str
+    tool_name: str
+    reason: str
+    created_at: float = field(default_factory=time.time)
 
 
 # =============================================================================
@@ -732,21 +758,82 @@ def extract_tool_results(messages: list[MessageParam]) -> list[claude_protocol.T
     return results
 
 
-def maybe_build_tool_protocol_response(
+async def register_pending_tool_call(
+    model_name: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    original_user_text: str,
+    requires_approval: bool,
+    approval_reason: str = "",
+) -> tuple[str, str | None]:
+    """Register a pending tool call and optional approval request."""
+    tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
+    approval_request_id = f"apr_{uuid.uuid4().hex[:24]}" if requires_approval else None
+
+    async with pending_state_lock:
+        pending_tool_calls[tool_use_id] = PendingToolCall(
+            tool_use_id=tool_use_id,
+            model_name=model_name,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            original_user_text=original_user_text,
+            approved=not requires_approval,
+            approval_request_id=approval_request_id,
+        )
+        if approval_request_id:
+            pending_approvals[approval_request_id] = PendingApproval(
+                approval_request_id=approval_request_id,
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                reason=approval_reason,
+            )
+
+    return tool_use_id, approval_request_id
+
+
+async def get_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
+    """Look up a pending tool call."""
+    async with pending_state_lock:
+        return pending_tool_calls.get(tool_use_id)
+
+
+async def approve_pending_tool_call(approval_request_id: str, approve: bool) -> PendingToolCall | None:
+    """Approve or reject a pending tool call."""
+    async with pending_state_lock:
+        approval = pending_approvals.get(approval_request_id)
+        if not approval:
+            return None
+
+        pending = pending_tool_calls.get(approval.tool_use_id)
+        if not pending:
+            pending_approvals.pop(approval_request_id, None)
+            return None
+
+        if approve:
+            pending.approved = True
+        else:
+            pending_tool_calls.pop(pending.tool_use_id, None)
+
+        pending_approvals.pop(approval_request_id, None)
+        return pending
+
+
+async def pop_pending_tool_call(tool_use_id: str) -> PendingToolCall | None:
+    """Remove and return a pending tool call."""
+    async with pending_state_lock:
+        pending = pending_tool_calls.pop(tool_use_id, None)
+        if pending and pending.approval_request_id:
+            pending_approvals.pop(pending.approval_request_id, None)
+        return pending
+
+
+async def maybe_build_tool_protocol_response(
     request_model: str,
     messages: list[MessageParam],
     tools: list[dict[str, Any]] | None,
     input_tokens: int,
 ) -> dict[str, Any] | None:
-    """Return a Claude tool_use response when protocol handling should take over.
-
-    Current behavior:
-    - If there are incoming tool_result blocks, acknowledge them in-band so the
-      client can continue the tool loop.
-    - If tools are available and the user appears to request a file mutation,
-      emit a tool_use block instead of plain text.
-    - For write-like tools, return an approval request payload in the tool input.
-    """
+    """Return a Claude tool_use response when protocol handling should take over."""
     normalized_tools = claude_protocol.extract_tool_definitions(tools)
     if not normalized_tools:
         return None
@@ -754,21 +841,29 @@ def maybe_build_tool_protocol_response(
     response_id = f"msg_{uuid.uuid4().hex[:24]}"
     tool_results = extract_tool_results(messages)
     if tool_results:
-        summary_lines = []
+        summary_lines: list[str] = []
         for result in tool_results:
+            pending = await pop_pending_tool_call(result.tool_use_id)
             status = "error" if result.is_error else "ok"
-            summary_lines.append(f"Tool result received for {result.tool_use_id} ({status}).")
+            if pending is not None:
+                summary_lines.append(
+                    f"Tool {pending.tool_name} completed for request '{pending.original_user_text}' ({status})."
+                )
+            else:
+                summary_lines.append(f"Tool result received for {result.tool_use_id} ({status}).")
+
+        summary_text = "\n".join(summary_lines)
         return {
             "id": response_id,
             "type": "message",
             "role": "assistant",
-            "content": [{"type": "text", "text": "\n".join(summary_lines)}],
+            "content": [{"type": "text", "text": summary_text}],
             "model": request_model,
             "stop_reason": "end_turn",
             "stop_sequence": None,
             "usage": {
                 "input_tokens": input_tokens,
-                "output_tokens": estimate_tokens("\n".join(summary_lines)),
+                "output_tokens": estimate_tokens(summary_text),
             },
         }
 
@@ -790,14 +885,26 @@ def maybe_build_tool_protocol_response(
         return None
 
     selected_tool = normalized_tools[0]
-    tool_input = {"query": extract_last_user_text(messages)}
+    original_user_text = extract_last_user_text(messages)
+    tool_input = {"query": original_user_text}
 
-    if claude_protocol.requires_approval(selected_tool.name):
+    approval_required = claude_protocol.requires_approval(selected_tool.name)
+    tool_use_id, approval_request_id = await register_pending_tool_call(
+        model_name=request_model,
+        tool_name=selected_tool.name,
+        tool_input=tool_input,
+        original_user_text=original_user_text,
+        requires_approval=approval_required,
+        approval_reason="This tool appears to modify files or workspace state.",
+    )
+
+    if approval_required and approval_request_id is not None:
         approval_payload = claude_protocol.build_openai_mcp_approval_request(
             selected_tool.name,
             tool_input,
             reason="This tool appears to modify files or workspace state.",
         )
+        approval_payload["approval_request_id"] = approval_request_id
         tool_input = {
             **tool_input,
             "_approval": approval_payload,
@@ -806,6 +913,7 @@ def maybe_build_tool_protocol_response(
     tool_block = claude_protocol.build_tool_use_block(
         name=selected_tool.name,
         tool_input=tool_input,
+        tool_use_id=tool_use_id,
     )
     return claude_protocol.tool_use_stop_response(
         message_id=response_id,
@@ -814,6 +922,242 @@ def maybe_build_tool_protocol_response(
         input_tokens=input_tokens,
         output_tokens=estimate_tokens(selected_tool.name),
     )
+
+
+def extract_openai_approval_response(input_value: str | list[dict[str, Any]]) -> tuple[str, bool] | None:
+    """Extract an OpenAI Responses approval reply if present."""
+    if isinstance(input_value, str):
+        return None
+
+    for item in input_value:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "mcp_approval_response":
+            continue
+        approval_request_id = str(item.get("approval_request_id", "")).strip()
+        approve = bool(item.get("approve", False))
+        if approval_request_id:
+            return approval_request_id, approve
+
+    return None
+
+
+def extract_openai_tool_result(input_value: str | list[dict[str, Any]]) -> tuple[str, str, bool] | None:
+    """Extract an OpenAI Responses tool result if present."""
+    if isinstance(input_value, str):
+        return None
+
+    for item in input_value:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") not in ("mcp_tool_result", "tool_result"):
+            continue
+
+        tool_use_id = str(item.get("tool_use_id", item.get("call_id", ""))).strip()
+        content = str(item.get("content", ""))
+        is_error = bool(item.get("is_error", False))
+        if tool_use_id:
+            return tool_use_id, content, is_error
+
+    return None
+
+
+def responses_tools_to_claude_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Normalize OpenAI-style tool definitions into Claude helper input."""
+    if not tools:
+        return []
+    return [tool for tool in tools if isinstance(tool, dict)]
+
+
+async def maybe_build_responses_protocol_output(
+    model_name: str,
+    user_input: str,
+    tools: list[dict[str, Any]] | None,
+    raw_input: str | list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a minimal MCP/tool-call style protocol response for /v1/responses."""
+    approval_response = extract_openai_approval_response(raw_input)
+    if approval_response is not None:
+        approval_request_id, approve = approval_response
+        pending = await approve_pending_tool_call(approval_request_id, approve)
+        if pending is None:
+            return {
+                "id": f"resp_{uuid.uuid4().hex[:24]}",
+                "object": "response",
+                "created_at": int(time.time()),
+                "status": "failed",
+                "model": model_name,
+                "output": [],
+                "output_text": "Approval request not found.",
+                "usage": {
+                    "prompt_tokens": estimate_tokens(user_input),
+                    "completion_tokens": 0,
+                    "total_tokens": estimate_tokens(user_input),
+                },
+            }
+
+        if not approve:
+            return {
+                "id": f"resp_{uuid.uuid4().hex[:24]}",
+                "object": "response",
+                "created_at": int(time.time()),
+                "status": "completed",
+                "model": model_name,
+                "output": [],
+                "output_text": f"Tool call {pending.tool_name} was rejected by the user.",
+                "usage": {
+                    "prompt_tokens": estimate_tokens(user_input),
+                    "completion_tokens": 0,
+                    "total_tokens": estimate_tokens(user_input),
+                },
+            }
+
+        return {
+            "id": f"resp_{uuid.uuid4().hex[:24]}",
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "requires_action",
+            "model": model_name,
+            "output": [
+                {
+                    "type": "mcp_call",
+                    "id": pending.tool_use_id,
+                    "tool_name": pending.tool_name,
+                    "arguments": pending.tool_input,
+                    "status": "approved",
+                }
+            ],
+            "output_text": "",
+            "usage": {
+                "prompt_tokens": estimate_tokens(user_input),
+                "completion_tokens": 0,
+                "total_tokens": estimate_tokens(user_input),
+            },
+        }
+
+    tool_result = extract_openai_tool_result(raw_input)
+    if tool_result is not None:
+        tool_use_id, content, is_error = tool_result
+        pending = await pop_pending_tool_call(tool_use_id)
+        if pending is None:
+            message = f"Tool result received for unknown tool call {tool_use_id}."
+        else:
+            status = "error" if is_error else "ok"
+            message = f"Tool {pending.tool_name} completed for request '{pending.original_user_text}' ({status})."
+            if content:
+                message += f"\n\nTool output:\n{content}"
+
+        return {
+            "id": f"resp_{uuid.uuid4().hex[:24]}",
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "completed",
+            "model": model_name,
+            "output": [
+                {
+                    "type": "message",
+                    "id": f"msg_{uuid.uuid4().hex[:24]}",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": message}],
+                }
+            ],
+            "output_text": message,
+            "usage": {
+                "prompt_tokens": estimate_tokens(user_input),
+                "completion_tokens": estimate_tokens(message),
+                "total_tokens": estimate_tokens(user_input) + estimate_tokens(message),
+            },
+        }
+
+    normalized_tools = claude_protocol.extract_tool_definitions(
+        responses_tools_to_claude_tools(tools)
+    )
+    if not normalized_tools:
+        return None
+
+    lowered = user_input.lower()
+    write_markers = (
+        "write",
+        "edit",
+        "modify",
+        "update",
+        "create file",
+        "save",
+        "delete",
+        "rename",
+        "move file",
+        "replace",
+        "patch",
+    )
+    if not any(marker in lowered for marker in write_markers):
+        return None
+
+    tool = normalized_tools[0]
+    tool_input = {"query": user_input}
+    approval_required = claude_protocol.requires_approval(tool.name)
+
+    tool_use_id, approval_request_id = await register_pending_tool_call(
+        model_name=model_name,
+        tool_name=tool.name,
+        tool_input=tool_input,
+        original_user_text=user_input,
+        requires_approval=approval_required,
+        approval_reason="This tool appears to modify files or workspace state.",
+    )
+
+    if approval_required and approval_request_id is not None:
+        approval = claude_protocol.build_openai_mcp_approval_request(
+            tool.name,
+            tool_input,
+            reason="This tool appears to modify files or workspace state.",
+        )
+        approval["approval_request_id"] = approval_request_id
+        return {
+            "id": f"resp_{uuid.uuid4().hex[:24]}",
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "requires_action",
+            "model": model_name,
+            "output": [
+                approval,
+                {
+                    "type": "mcp_call",
+                    "id": tool_use_id,
+                    "tool_name": tool.name,
+                    "arguments": tool_input,
+                    "status": "pending_approval",
+                },
+            ],
+            "output_text": "",
+            "usage": {
+                "prompt_tokens": estimate_tokens(user_input),
+                "completion_tokens": 0,
+                "total_tokens": estimate_tokens(user_input),
+            },
+        }
+
+    return {
+        "id": f"resp_{uuid.uuid4().hex[:24]}",
+        "object": "response",
+        "created_at": int(time.time()),
+        "status": "requires_action",
+        "model": model_name,
+        "output": [
+            {
+                "type": "mcp_call",
+                "id": tool_use_id,
+                "tool_name": tool.name,
+                "arguments": tool_input,
+                "status": "approved",
+            }
+        ],
+        "output_text": "",
+        "usage": {
+            "prompt_tokens": estimate_tokens(user_input),
+            "completion_tokens": 0,
+            "total_tokens": estimate_tokens(user_input),
+        },
+    }
 
 def responses_tools_to_claude_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Normalize OpenAI-style tool definitions into Claude helper input."""
@@ -1067,10 +1411,11 @@ async def create_message(request: Request, body: MessagesRequest):
         f"stream={body.stream}, tools={len(body.tools or [])}"
     )
 
-    protocol_output = maybe_build_responses_protocol_output(
+    protocol_output = await maybe_build_responses_protocol_output(
         model_name=body.model,
         user_input=query,
         tools=body.tools,
+        raw_input=body.input,
     )
     if protocol_output is not None:
         return protocol_output
