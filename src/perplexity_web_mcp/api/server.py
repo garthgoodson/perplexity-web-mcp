@@ -2440,3 +2440,59 @@ def run_server():
 if __name__ == "__main__":
     run_server()
 
+def claude_stream_protocol_response(protocol_output: dict[str, Any]):
+    """Stream an already-built Claude protocol response as Anthropic SSE events."""
+    import json
+
+    message_id = str(protocol_output.get("id", f"msg_{uuid.uuid4().hex[:24]}"))
+    model = str(protocol_output.get("model", "claude-compatible"))
+    content = protocol_output.get("content", [])
+    usage = protocol_output.get("usage", {"input_tokens": 0, "output_tokens": 0})
+
+    message_start = {
+        "type": "message_start",
+        "message": {
+            "id": message_id,
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": usage,
+        },
+    }
+    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+
+    for idx, block in enumerate(content):
+        if not isinstance(block, dict):
+            continue
+
+        yield f"event: content_block_start\ndata: {json.dumps({'index': idx, 'content_block': block})}\n\n"
+
+        if block.get("type") == "text":
+            text_value = str(block.get("text", ""))
+            if text_value:
+                delta = {
+                    "index": idx,
+                    "delta": {
+                        "type": "text_delta",
+                        "text": text_value,
+                    },
+                }
+                yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+
+        yield f"event: content_block_stop\ndata: {json.dumps({'index': idx})}\n\n"
+
+    message_delta = {
+        "type": "message_delta",
+        "delta": {
+            "stop_reason": protocol_output.get("stop_reason", "end_turn"),
+            "stop_sequence": protocol_output.get("stop_sequence"),
+        },
+        "usage": usage,
+    }
+    yield f"event: message_delta\ndata: {json.dumps(message_delta)}\n\n"
+    yield "event: message_stop\ndata: {}\n\n"
+
+
