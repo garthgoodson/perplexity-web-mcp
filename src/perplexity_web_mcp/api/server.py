@@ -971,6 +971,9 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 
+
+
+
 def find_tool_by_name(tools: list[dict[str, Any]] | None, name: str) -> dict[str, Any] | None:
     """Return the first tool with the given name."""
     if not tools:
@@ -981,13 +984,13 @@ def find_tool_by_name(tools: list[dict[str, Any]] | None, name: str) -> dict[str
     return None
 
 
-def extract_simple_file_write_request(user_text: str) -> tuple[str, str] | None:
-    """Extract (filename, content) for simple file-write requests.
+def shell_escape_single_quoted(value: str) -> str:
+    """Escape text for inclusion inside a single-quoted shell string."""
+    return value.replace("'", "'\"'\"'")
 
-    Handles prompts like:
-    - create a test text file called foo.txt with the word hello inside
-    - write a file named foo.txt containing hello
-    """
+
+def extract_simple_file_write_request(user_text: str) -> tuple[str, str] | None:
+    """Extract (filename, content) for simple file-write requests."""
     import re as _re
 
     text = user_text.strip()
@@ -1052,7 +1055,7 @@ async def maybe_build_direct_file_write_tool_use(
             "content": content,
         }
     elif bash_tool is not None:
-        escaped = content[:-1].replace("'", "'"'"'")
+        escaped = shell_escape_single_quoted(content[:-1])
         tool_name = "Bash"
         tool_input = {
             "command": f"printf '%s\\n' '{escaped}' > '{abs_path}'",
