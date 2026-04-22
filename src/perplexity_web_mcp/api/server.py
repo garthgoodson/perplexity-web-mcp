@@ -386,7 +386,6 @@ class OpenAIChatRequest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-
 class OpenAIResponsesRequest(BaseModel):
     """Minimal OpenAI Responses API request.
 
@@ -398,6 +397,7 @@ class OpenAIResponsesRequest(BaseModel):
     stream: bool = Field(False, description="Enable streaming response")
     instructions: str | None = Field(None, description="Optional system/instructions text")
     reasoning: dict[str, Any] | None = Field(None, description="Optional reasoning config")
+    tools: list[dict[str, Any]] | None = Field(None, description="Optional MCP/tool definitions")
 
     model_config = ConfigDict(extra="allow")
 
@@ -815,7 +815,97 @@ def maybe_build_tool_protocol_response(
         output_tokens=estimate_tokens(selected_tool.name),
     )
 
+def responses_tools_to_claude_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Normalize OpenAI-style tool definitions into Claude helper input."""
+    if not tools:
+        return []
+    return [tool for tool in tools if isinstance(tool, dict)]
 
+
+def maybe_build_responses_protocol_output(
+    model_name: str,
+    user_input: str,
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Return a minimal MCP/tool-call style protocol response for /v1/responses."""
+    normalized_tools = claude_protocol.extract_tool_definitions(
+        responses_tools_to_claude_tools(tools)
+    )
+    if not normalized_tools:
+        return None
+
+    lowered = user_input.lower()
+    write_markers = (
+        "write",
+        "edit",
+        "modify",
+        "update",
+        "create file",
+        "save",
+        "delete",
+        "rename",
+        "move file",
+        "replace",
+        "patch",
+    )
+    if not any(marker in lowered for marker in write_markers):
+        return None
+
+    tool = normalized_tools[0]
+    tool_input = {"query": user_input}
+
+    if claude_protocol.requires_approval(tool.name):
+        approval = claude_protocol.build_openai_mcp_approval_request(
+            tool.name,
+            tool_input,
+            reason="This tool appears to modify files or workspace state.",
+        )
+        return {
+            "id": f"resp_{uuid.uuid4().hex[:24]}",
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "requires_action",
+            "model": model_name,
+            "output": [
+                approval,
+                {
+                    "type": "mcp_call",
+                    "id": f"mcpl_{uuid.uuid4().hex[:24]}",
+                    "tool_name": tool.name,
+                    "arguments": tool_input,
+                    "status": "pending_approval",
+                },
+            ],
+            "output_text": "",
+            "usage": {
+                "prompt_tokens": estimate_tokens(user_input),
+                "completion_tokens": 0,
+                "total_tokens": estimate_tokens(user_input),
+            },
+        }
+
+    return {
+        "id": f"resp_{uuid.uuid4().hex[:24]}",
+        "object": "response",
+        "created_at": int(time.time()),
+        "status": "requires_action",
+        "model": model_name,
+        "output": [
+            {
+                "type": "mcp_call",
+                "id": f"mcpl_{uuid.uuid4().hex[:24]}",
+                "tool_name": tool.name,
+                "arguments": tool_input,
+                "status": "completed",
+            }
+        ],
+        "output_text": "",
+        "usage": {
+            "prompt_tokens": estimate_tokens(user_input),
+            "completion_tokens": 0,
+            "total_tokens": estimate_tokens(user_input),
+        },
+    }
 
 async def run_perplexity_query(
     model: Model,
@@ -961,17 +1051,31 @@ async def create_message(request: Request, body: MessagesRequest):
             status_code=400,
             detail={"type": "invalid_request_error", "message": "messages is required"},
         )
-
     thinking_enabled = body.thinking is not None and body.thinking.get("type") == "enabled"
     model = get_model(body.model, thinking=thinking_enabled)
-    system_text = body.get_system_text()
-    query = messages_to_query(body.messages)
+
+    system_text = body.instructions or responses_input_to_instructions(body.input)
+    thinking_enabled = is_thinking_enabled(reasoning=body.reasoning)
+    model = get_model(body.model, thinking=thinking_enabled)
+
+    response_id = f"resp_{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
     input_tokens = estimate_tokens(query)
-    response_id = f"msg_{uuid.uuid4().hex[:24]}"
 
-    logging.info(f"Request: model={body.model}, thinking={thinking_enabled}, stream={body.stream}")
+    logging.info(
+        f"OpenAI Responses Request: model={body.model}, thinking={thinking_enabled}, "
+        f"stream={body.stream}, tools={len(body.tools or [])}"
+    )
 
-    if body.stream:
+    protocol_output = maybe_build_responses_protocol_output(
+        model_name=body.model,
+        user_input=query,
+        tools=body.tools,
+    )
+    if protocol_output is not None:
+        return protocol_output
+
+    if body.stream:        
         return StreamingResponse(
             stream_response(response_id, body.model, model, query, input_tokens, system_text),
             media_type="text/event-stream",
