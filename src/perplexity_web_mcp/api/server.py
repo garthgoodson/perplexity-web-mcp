@@ -1639,6 +1639,21 @@ async def run_perplexity_query(
             fresh_client.close()
 
 
+
+def format_citations(search_results: list) -> str:
+    """Format search results as citations to append to response."""
+    if not search_results:
+        return ""
+
+    citations = ["\n\nCitations:"]
+    for i, result in enumerate(search_results, 1):
+        url = getattr(result, "url", "") or ""
+        if url:
+            citations.append(f"\n[{i}]: {url}")
+
+    return "".join(citations) if len(citations) > 1 else ""
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token estimate."""
     return len(text) // 4
@@ -1872,6 +1887,7 @@ async def create_message(body: MessagesRequest, request: Request):
     # Claude-native tools should exist on MessagesRequest, but guard anyway so this
     # path can tolerate mixed payloads during compatibility work.
     body_tools = getattr(body, "tools", None)
+    logging.debug("Claude request tools: %s", json.dumps(body_tools, default=str))
     protocol_output = await maybe_build_claude_protocol_response(
         model_name=body.model,
         messages=body.messages,
