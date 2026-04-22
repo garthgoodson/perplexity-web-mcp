@@ -634,6 +634,52 @@ def openai_messages_to_query(messages: list[OpenAIChatMessage]) -> str:
     return "\n\n".join(parts)
 
 
+
+
+def claude_latest_user_text(messages) -> str:
+    """Extract the latest real user text from Claude messages for tool input.
+
+    Unlike broader prompt-building helpers, this intentionally ignores
+    assistant turns, system reminders, and retry boilerplate so that Claude
+    tool_use blocks contain only the user request.
+    """
+    for message in reversed(messages):
+        role = getattr(message, "role", None)
+        if role is None and isinstance(message, dict):
+            role = message.get("role")
+        if role != "user":
+            continue
+
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
+
+        if isinstance(content, str):
+            candidate = content.strip()
+            if candidate:
+                return candidate
+
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                block_type = getattr(block, "type", None)
+                text_value = getattr(block, "text", None)
+
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    text_value = block.get("text")
+
+                if block_type == "text":
+                    candidate = str(text_value or "").strip()
+                    if candidate:
+                        parts.append(candidate)
+
+            if parts:
+                return "\n".join(parts)
+
+    return ""
+
+
 def claude_input_to_query(messages: list[dict[str, Any]]) -> str:
     """Extract the latest meaningful user text from Claude messages."""
     latest_user_text = ""
@@ -976,19 +1022,42 @@ async def maybe_build_claude_protocol_response(
 ) -> dict[str, Any] | None:
     """Claude-specific wrapper around the shared tool protocol helper.
 
-    Keep the original message objects intact so downstream helpers that expect
-    attribute access like ``msg.role`` continue to work. We intentionally do
-    not inject ``system_text`` here as a raw dict message, because that breaks
-    the shared tool protocol path. This preserves the Codex/Responses path,
-    which does not use this wrapper at all.
+    Keep the original message objects intact for the shared helper, then
+    post-process the returned Claude tool_use payload so that input.query
+    contains only the latest real user request rather than expanded prompt
+    scaffolding or retry boilerplate.
     """
     input_tokens = estimate_tokens(claude_input_to_query(messages))
-    return await maybe_build_tool_protocol_response(
+    protocol_output = await maybe_build_tool_protocol_response(
         request_model=model_name,
         messages=messages,
         tools=tools,
         input_tokens=input_tokens,
     )
+
+    if not protocol_output:
+        return protocol_output
+
+    latest_user_text = claude_latest_user_text(messages)
+    if not latest_user_text:
+        return protocol_output
+
+    content = protocol_output.get("content")
+    if not isinstance(content, list):
+        return protocol_output
+
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != "tool_use":
+            continue
+        tool_input = block.get("input")
+        if not isinstance(tool_input, dict):
+            continue
+        if "query" in tool_input:
+            tool_input["query"] = latest_user_text
+
+    return protocol_output
 
 async def maybe_build_tool_protocol_response(
     request_model: str,
