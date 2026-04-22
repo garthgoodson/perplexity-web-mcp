@@ -45,7 +45,7 @@ from typing import Any, AsyncGenerator
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from perplexity_web_mcp import Perplexity, ConversationConfig, Models
@@ -1512,11 +1512,12 @@ async def create_message(body: MessagesRequest, request: Request):
     anthropic_version = request.headers.get("anthropic-version", "")
     query = claude_input_to_query(body.messages)
     input_value = getattr(body, "input", None)
-    system_text = (
-        getattr(body, "system", None)
-        or getattr(body, "instructions", None)
-        or (responses_input_to_instructions(input_value) if input_value is not None else None)
-    )
+    system_text = body.get_system_text()
+    if system_text is None:
+        system_text = (
+            getattr(body, "instructions", None)
+            or (responses_input_to_instructions(input_value) if input_value is not None else None)
+        )
     thinking_enabled = is_thinking_enabled(reasoning=getattr(body, "reasoning", None))
     model = get_model(body.model, thinking=thinking_enabled)
 
@@ -1566,11 +1567,6 @@ async def create_message(body: MessagesRequest, request: Request):
     }
 
     logger.debug("Claude response: %s", json.dumps(response, default=str))
-    if body.stream:
-        return StreamingResponse(
-            claude_stream_text_response(response, response_text),
-            media_type="text/event-stream",
-        )
     return JSONResponse(content=response)
 
 async def stream_response(
